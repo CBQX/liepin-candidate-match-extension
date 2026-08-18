@@ -196,4 +196,40 @@ describe("side-panel jobs", () => {
     await user.click(screen.getByRole("button", { name: "匹配分析" }));
     expect(deps.extractCurrentCandidate).toHaveBeenCalledTimes(1);
   });
+
+  it("keeps the previous job and shows a Chinese error when switching rejects", async () => {
+    // Break caught: an unhandled repository rejection could leave the selector misleading or crash the UI flow.
+    const deps = createFakeDependencies({
+      settings,
+      jobs: [jobA, jobB],
+      activeJobId: jobA.id
+    });
+    deps.jobs.activate.mockRejectedValueOnce(new Error("storage unavailable"));
+    const user = userEvent.setup();
+    render(<App deps={deps} />);
+
+    const selector = await screen.findByRole("combobox", { name: "当前岗位" }) as HTMLSelectElement;
+    await user.selectOptions(selector, jobB.id);
+
+    expect(await screen.findByText("岗位切换失败，请重试。")).toBeTruthy();
+    expect(selector.value).toBe(jobA.id);
+    expect(screen.getByText("当前岗位 · 甲公司")).toBeTruthy();
+  });
+
+  it("shows a Chinese retry message when candidate extraction rejects", async () => {
+    // Break caught: a rejected runtime message must become actionable UI feedback, not an unhandled promise.
+    const deps = createFakeDependencies({
+      settings,
+      jobs: [jobA],
+      activeJobId: jobA.id
+    });
+    deps.extractCurrentCandidate.mockRejectedValueOnce(new Error("service worker unavailable"));
+    const user = userEvent.setup();
+    render(<App deps={deps} />);
+
+    await user.click(await screen.findByRole("button", { name: "匹配分析" }));
+
+    expect(await screen.findByText("候选人信息读取失败，请重试。")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "匹配分析" })).toBeTruthy();
+  });
 });

@@ -20,6 +20,7 @@ export function App({ deps }: AppProps) {
   const [activeJob, setActiveJob] = useState<Job>();
   const [addingJob, setAddingJob] = useState(false);
   const [switchingJob, setSwitchingJob] = useState(false);
+  const [switchError, setSwitchError] = useState("");
   const [loadError, setLoadError] = useState("");
 
   useEffect(() => {
@@ -78,20 +79,27 @@ export function App({ deps }: AppProps) {
   async function switchJob(id: string) {
     const selectedJob = jobs.find((job) => job.id === id);
     if (!selectedJob) return;
+    setSwitchError("");
     setSwitchingJob(true);
     try {
       await deps.jobs.activate(id);
       setActiveJob(selectedJob);
       setAddingJob(false);
       setSetupState("ready");
+    } catch {
+      setSwitchError("岗位切换失败，请重试。");
     } finally {
       setSwitchingJob(false);
     }
   }
 
   async function matchAnalysis() {
-    const response = await deps.extractCurrentCandidate();
-    return response.ok ? undefined : response.error.message;
+    try {
+      const response = await deps.extractCurrentCandidate();
+      return response.ok ? undefined : response.error.message;
+    } catch {
+      return "候选人信息读取失败，请重试。";
+    }
   }
 
   return (
@@ -107,9 +115,13 @@ export function App({ deps }: AppProps) {
           activeJobId={activeJob?.id}
           disabled={switchingJob}
           onChange={(id) => void switchJob(id)}
-          onAdd={() => setAddingJob(true)}
+          onAdd={() => {
+            setSwitchError("");
+            setAddingJob(true);
+          }}
         />
       )}
+      {switchError && <p className="form-error" role="alert">{switchError}</p>}
 
       {loadError && <p className="form-error" role="alert">{loadError}</p>}
       {!loadError && setupState === "loading" && <p className="loading-state">正在读取设置…</p>}
