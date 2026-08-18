@@ -57,6 +57,33 @@ describe("Liepin candidate extraction", () => {
       extractCandidate(document, new URL("https://notliepin.com/candidate/fixture"))
     ).toThrow("仅支持猎聘候选人页面");
   });
+
+  it.each([
+    "https://www.liepin.com/",
+    "https://www.liepin.com/zhaopin/",
+    "https://www.liepin.com/company/123",
+    "https://www.liepin.com/job/456",
+    "https://www.liepin.com/candidate/"
+  ])("rejects non-detail Liepin page %s without visible-body fallback", (url) => {
+    // Break caught: accepting any Liepin host would turn search/list/home/company
+    // or job-page body text into a candidate draft.
+    document.body.innerHTML = "<main>非候选人页面的可见列表内容</main>";
+
+    expect(() => extractCandidate(document, new URL(url)))
+      .toThrow("仅支持猎聘候选人页面");
+  });
+
+  it.each([
+    "https://www.liepin.com/candidate/fixture",
+    "https://www.liepin.com/candidate/fixture/?from=reviewed-test"
+  ])("supports reviewed candidate-detail route %s", async (url) => {
+    // Break caught: the shared eligibility predicate could reject the already
+    // reviewed fixture route after centralization.
+    document.body.innerHTML = await fixture("unstructured-profile.html");
+
+    expect(extractCandidate(document, new URL(url)).other.text)
+      .toContain("没有标准标题");
+  });
 });
 
 describe("visible text extraction", () => {

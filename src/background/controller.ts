@@ -3,6 +3,7 @@ import type { ProviderSettings } from "../repositories/chrome-provider-settings"
 import type { ModelProvider } from "../providers/model-provider";
 import { mapProviderError } from "../providers/deepseek/deepseek-provider";
 import { redactCandidateDraft } from "../shared/privacy";
+import { isSupportedLiepinCandidateDetailPage } from "../shared/liepin-page";
 import { analyzeCandidate } from "./analyze-candidate";
 
 type ActiveTab = Pick<chrome.tabs.Tab, "id" | "url"> | undefined;
@@ -27,21 +28,6 @@ const unsupportedPage = (): RuntimeResponse => ({
   ok: false,
   error: { code: "UNSUPPORTED_PAGE", message: "请在猎聘候选人详情页中使用此功能。" }
 });
-
-function isLiepinPage(url: string | undefined): boolean {
-  if (!url) {
-    return false;
-  }
-
-  try {
-    const pageUrl = new URL(url);
-    return pageUrl.protocol === "https:" && (
-      pageUrl.hostname === "liepin.com" || pageUrl.hostname.endsWith(".liepin.com")
-    );
-  } catch {
-    return false;
-  }
-}
 
 async function loadSettings(
   dependencies: BackgroundControllerDependencies
@@ -126,7 +112,11 @@ export function createBackgroundController(
       }
 
       const activeTab = await dependencies.getActiveTab();
-      if (typeof activeTab?.id !== "number" || !isLiepinPage(activeTab.url)) {
+      if (
+        typeof activeTab?.id !== "number"
+        || !activeTab.url
+        || !isSupportedLiepinCandidateDetailPage(activeTab.url)
+      ) {
         return unsupportedPage();
       }
 

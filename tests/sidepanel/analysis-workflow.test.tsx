@@ -187,6 +187,41 @@ describe("analysis workflow", () => {
     }
   );
 
+  it("returns to the preserved edited preview after invalid-key reconfiguration", async () => {
+    // Break caught: reconfiguring credentials after an analysis failure could
+    // discard the confirmed transient draft or force an unauthorized re-extraction.
+    const deps = createDependencies(vi.fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        error: { code: "INVALID_API_KEY", message: "DeepSeek API Key 无效，请检查后重试。" }
+      })
+      .mockResolvedValueOnce({ ok: true, data: result }));
+    const user = userEvent.setup();
+    render(<App deps={deps} />);
+
+    await user.click(await screen.findByRole("button", { name: "匹配分析" }));
+    fireEvent.change(await screen.findByLabelText("技能"), {
+      target: { value: "SaaS、AI、QA-EDIT-RETAINED" }
+    });
+    await user.click(screen.getByRole("button", { name: "确认并分析" }));
+    await user.click(await screen.findByRole("button", { name: "重新配置模型" }));
+
+    await user.type(await screen.findByLabelText("DeepSeek API Key"), "sk-recovered-test");
+    await user.click(screen.getByRole("button", { name: "验证并保存" }));
+
+    expect(await screen.findByRole("button", { name: "确认并分析" })).toBeTruthy();
+    expect((screen.getByLabelText("技能") as HTMLTextAreaElement).value)
+      .toBe("SaaS、AI、QA-EDIT-RETAINED");
+    expect(deps.extractCurrentCandidate).toHaveBeenCalledTimes(1);
+
+    await user.click(screen.getByRole("button", { name: "确认并分析" }));
+
+    expect(await screen.findByText("猎头结论")).toBeTruthy();
+    expect(deps.analyzeCandidate).toHaveBeenCalledTimes(2);
+    expect(deps.analyzeCandidate.mock.calls[1]?.[1].skills.text)
+      .toBe("SaaS、AI、QA-EDIT-RETAINED");
+  });
+
   it("discards a deferred analysis result after a page-context change", async () => {
     // Break caught: a late model response could repopulate a candidate/result after URL navigation cleared the session.
     const pending = deferred<Awaited<ReturnType<Analyze>>>();

@@ -40,6 +40,27 @@ describe("background controller", () => {
     expect(sendToTab).not.toHaveBeenCalled();
   });
 
+  it.each([
+    "https://www.liepin.com/",
+    "https://www.liepin.com/zhaopin/",
+    "https://www.liepin.com/company/123",
+    "https://www.liepin.com/job/456",
+    "https://www.liepin.com/candidate/"
+  ])("rejects non-detail Liepin page %s before messaging content", async (url) => {
+    // Break caught: a host-only guard could scrape search, company, job, home,
+    // or candidate-list content through the visible-body fallback.
+    const sendToTab = vi.fn();
+    const controller = createBackgroundController(dependencies({
+      getActiveTab: async () => ({ id: 8, url }),
+      sendToTab
+    }));
+
+    const result = await controller.handle({ type: "EXTRACT_CURRENT_CANDIDATE" });
+
+    expect(result).toMatchObject({ ok: false, error: { code: "UNSUPPORTED_PAGE" } });
+    expect(sendToTab).not.toHaveBeenCalled();
+  });
+
   it("relays extraction only to the current Liepin tab", async () => {
     // Break caught: routing the request to a stale or arbitrary tab would expose the wrong candidate.
     const sendToTab = vi.fn().mockResolvedValue({ ok: true, data: candidateDraft });
@@ -52,6 +73,23 @@ describe("background controller", () => {
 
     expect(result).toEqual({ ok: true, data: candidateDraft });
     expect(sendToTab).toHaveBeenCalledWith(9, { type: "EXTRACT_CURRENT_CANDIDATE" });
+  });
+
+  it.each([
+    "https://www.liepin.com/candidate/fixture",
+    "https://www.liepin.com/candidate/fixture/?from=reviewed-test"
+  ])("relays extraction for reviewed candidate-detail route %s", async (url) => {
+    // Break caught: an over-tight page guard could reject the reviewed detail
+    // route when it carries a trailing slash or harmless query parameters.
+    const sendToTab = vi.fn().mockResolvedValue({ ok: true, data: candidateDraft });
+    const controller = createBackgroundController(dependencies({
+      getActiveTab: async () => ({ id: 10, url }),
+      sendToTab
+    }));
+
+    await expect(controller.handle({ type: "EXTRACT_CURRENT_CANDIDATE" }))
+      .resolves.toEqual({ ok: true, data: candidateDraft });
+    expect(sendToTab).toHaveBeenCalledWith(10, { type: "EXTRACT_CURRENT_CANDIDATE" });
   });
 
   it("treats an active tab without an accessible URL as unsupported", async () => {

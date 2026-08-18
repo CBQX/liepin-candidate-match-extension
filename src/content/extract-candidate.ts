@@ -11,17 +11,16 @@ import {
   sectionForHeading,
   type CandidateSection
 } from "./section-aliases";
+import {
+  isSupportedLiepinCandidateDetailPage,
+  type LiepinPageLocation
+} from "../shared/liepin-page";
 
 export class UnsupportedPageError extends Error {
   constructor() {
     super("仅支持猎聘候选人页面");
     this.name = "UnsupportedPageError";
   }
-}
-
-function isLiepinHost(hostname: string): boolean {
-  const normalized = hostname.toLowerCase().replace(/\.$/u, "");
-  return normalized === "liepin.com" || normalized.endsWith(".liepin.com");
 }
 
 function emptySection(): ExtractedSection {
@@ -68,9 +67,9 @@ function belongsToHeading(node: Node, headings: ReadonlyMap<Element, CandidateSe
 
 export function extractCandidate(
   sourceDocument: Document,
-  sourceLocation: Pick<Location | URL, "hostname">
+  sourceLocation: LiepinPageLocation
 ): CandidateDraft {
-  if (!isLiepinHost(sourceLocation.hostname)) {
+  if (!isSupportedLiepinCandidateDetailPage(sourceLocation)) {
     throw new UnsupportedPageError();
   }
 
