@@ -90,6 +90,23 @@ describe("evaluateObjectiveRules", () => {
     });
   });
 
+  it.each([
+    "天津市和平区",
+    "新疆且末县",
+    "新疆维吾尔自治区和田地区"
+  ])("matches an explicit %s administrative location without treating name characters as conjunctions", (location) => {
+    const [result] = evaluateObjectiveRules(
+      [criterion(`工作地点：${location}`)],
+      { tokens: new Set(), locations: new Set([location]) }
+    );
+
+    expect(result).toEqual({
+      criterionId: "c1",
+      status: "met",
+      evidence: [`明确地点：${location}`]
+    });
+  });
+
   it("keeps compound location and availability wording unknown", () => {
     const [result] = evaluateObjectiveRules(
       [criterion("工作地点：上海且接受出差")],
@@ -103,7 +120,9 @@ describe("evaluateObjectiveRules", () => {
     "工作地点：上海且能接受出差",
     "工作地点：上海并接受出差",
     "工作地点：上海且须接受出差",
-    "工作地点：上海和北京"
+    "工作地点：上海和北京",
+    "工作地点：上海、北京",
+    "工作地点：上海及北京"
   ])("keeps additional location or mobility clause unknown: %s", (text) => {
     const locationValue = text.slice("工作地点：".length);
     const [result] = evaluateObjectiveRules(

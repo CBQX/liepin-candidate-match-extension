@@ -25,21 +25,39 @@ const isSupportedYearsCriterion = (text: string): boolean => new RegExp(
   "u"
 ).test(text.trim());
 
+const ADMINISTRATIVE_SUFFIX = /(?:特别行政区|自治区|自治州|自治县|自治旗|地区|林区|新区|开发区|盟|省|市|区|县|旗)$/u;
+const LOCATION_JOINERS = ["以及", "同时", "及", "与", "或", "并", "和", "且"] as const;
+
+const resemblesCompleteLocationName = (text: string): boolean => {
+  const name = text.replace(ADMINISTRATIVE_SUFFIX, "");
+  return /^[\p{Script=Han}]{2,}$/u.test(name);
+};
+
+const hasJoinedLocationNames = (location: string): boolean => LOCATION_JOINERS.some((joiner) => {
+  let joinerIndex = location.indexOf(joiner);
+  while (joinerIndex >= 0) {
+    const before = location.slice(0, joinerIndex);
+    const after = location.slice(joinerIndex + joiner.length);
+    if (resemblesCompleteLocationName(before) && resemblesCompleteLocationName(after)) {
+      return true;
+    }
+    joinerIndex = location.indexOf(joiner, joinerIndex + joiner.length);
+  }
+  return false;
+});
+
 const parseSupportedLocation = (text: string): string | undefined => {
   const match = text.trim().match(new RegExp(
-    String.raw`^${REQUIREMENT_PREFIX}(?:工作地点|办公地点|常驻地|所在地)\s*[:：]?\s*([^\s,，;；。|/]{2,20})$`,
+    String.raw`^${REQUIREMENT_PREFIX}(?:工作地点|办公地点|常驻地|所在地)\s*[:：]?\s*([\p{Script=Han}]{2,20})$`,
     "u"
   ));
   const location = match?.[1];
   if (!location) return undefined;
 
-  const hasInternalClauseConnector = /.+(?:且|并|以及|同时|与|或).+/u.test(location);
-  const hasMultipleLocationsJoinedByHe = /^.{2,}和.{2,}$/u.test(location);
   const hasMobilityOrAvailabilityClause = /接受|愿意|需要|要求|出差|差旅|搬迁|迁居|调动|远程|居家|到岗|入职|驻场|异地|办公方式|办公模式/u
     .test(location);
 
-  return hasInternalClauseConnector
-    || hasMultipleLocationsJoinedByHe
+  return hasJoinedLocationNames(location)
     || hasMobilityOrAvailabilityClause
     ? undefined
     : location;
