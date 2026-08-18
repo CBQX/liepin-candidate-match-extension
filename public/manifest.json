@@ -1,0 +1,20 @@
+{
+  "manifest_version": 3,
+  "minimum_chrome_version": "116",
+  "name": "猎头匹配助手",
+  "description": "在猎聘候选人详情页中进行岗位匹配分析。",
+  "version": "0.1.0",
+  "permissions": ["sidePanel", "storage"],
+  "host_permissions": [
+    "https://*.liepin.com/*",
+    "https://api.deepseek.com/*"
+  ],
+  "action": { "default_title": "打开猎头匹配助手" },
+  "side_panel": { "default_path": "sidepanel.html" },
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [{
+    "matches": ["https://*.liepin.com/*"],
+    "js": ["content.js"],
+    "run_at": "document_idle"
+  }]
+}
