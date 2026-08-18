@@ -13,6 +13,28 @@ const evaluation = (
   evidence: string[] = []
 ): RuleEvaluation => ({ criterionId, status, evidence });
 
+const REQUIREMENT_PREFIX = String.raw`(?:(?:必须|硬性(?:要求)?|要求|需|需要)\s*)?`;
+
+const isSupportedEducationCriterion = (text: string): boolean => new RegExp(
+  String.raw`^${REQUIREMENT_PREFIX}(?:学历\s*[:：]?\s*)?(?:中专|大专|专科|本科|学士|硕士|研究生|博士)(?:及以上|以上)?(?:学历|学位)?$`,
+  "u"
+).test(text.trim());
+
+const isSupportedYearsCriterion = (text: string): boolean => new RegExp(
+  String.raw`^${REQUIREMENT_PREFIX}(?:有|具备|拥有)?\s*\d+(?:\.\d+)?\s*年(?:以上|及以上|\+)?(?:相关|工作|从业)?经验$`,
+  "u"
+).test(text.trim());
+
+const isSupportedLocationCriterion = (text: string): boolean => new RegExp(
+  String.raw`^${REQUIREMENT_PREFIX}(?:工作地点|办公地点|常驻地|所在地)\s*[:：]?\s*[^\s,，;；。|/且和]{2,20}$`,
+  "u"
+).test(text.trim());
+
+const isSupportedTokenCriterion = (text: string, tokenPattern: RegExp): boolean => new RegExp(
+  String.raw`^${REQUIREMENT_PREFIX}(?:(?:持有|具备|拥有|通过)\s*)?(?:${tokenPattern.source})(?:\s*(?:证书|认证|资格))?$`,
+  tokenPattern.flags
+).test(text.trim());
+
 const requiredEducation = (text: string): EducationLevel | undefined => {
   if (/博士/u.test(text)) return "doctorate";
   if (/硕士|研究生/u.test(text)) return "master";
@@ -33,13 +55,13 @@ const requiredLocation = (text: string): string | undefined => {
   return match?.[1]?.trim();
 };
 
-const requiredToken = (text: string): readonly [string, string] | undefined => {
-  const alias = OBJECTIVE_TOKEN_ALIASES.find(([, , pattern]) => pattern.test(text));
-  return alias ? [alias[0], alias[1]] : undefined;
-};
+const requiredToken = (text: string) =>
+  OBJECTIVE_TOKEN_ALIASES.find(([, , pattern]) => pattern.test(text));
 
 const evaluateCriterion = (criterion: JobCriterion, facts: ObjectiveFacts): RuleEvaluation => {
-  const education = requiredEducation(criterion.text);
+  const education = isSupportedEducationCriterion(criterion.text)
+    ? requiredEducation(criterion.text)
+    : undefined;
   if (education) {
     if (!facts.educationLevel) return evaluation(criterion.id, "unknown");
 
@@ -52,7 +74,9 @@ const evaluateCriterion = (criterion: JobCriterion, facts: ObjectiveFacts): Rule
     );
   }
 
-  const years = requiredYears(criterion.text);
+  const years = isSupportedYearsCriterion(criterion.text)
+    ? requiredYears(criterion.text)
+    : undefined;
   if (years !== undefined) {
     if (facts.yearsExperience === undefined) return evaluation(criterion.id, "unknown");
     return evaluation(
@@ -62,7 +86,9 @@ const evaluateCriterion = (criterion: JobCriterion, facts: ObjectiveFacts): Rule
     );
   }
 
-  const location = requiredLocation(criterion.text);
+  const location = isSupportedLocationCriterion(criterion.text)
+    ? requiredLocation(criterion.text)
+    : undefined;
   if (location) {
     const locations = facts.locations ?? new Set<string>();
     if (locations.size === 0) return evaluation(criterion.id, "unknown");
@@ -73,7 +99,7 @@ const evaluateCriterion = (criterion: JobCriterion, facts: ObjectiveFacts): Rule
   }
 
   const token = requiredToken(criterion.text);
-  if (token) {
+  if (token && isSupportedTokenCriterion(criterion.text, token[2])) {
     const [normalized, label] = token;
     return facts.tokens.has(normalized)
       ? evaluation(criterion.id, "met", [`明确证书：${label}`])

@@ -47,6 +47,24 @@ describe("evaluateObjectiveRules", () => {
     expect(unknown?.status).toBe("unknown");
   });
 
+  it("does not treat generic experience years as B2B product experience", () => {
+    const [result] = evaluateObjectiveRules(
+      [criterion("必须有 5 年以上 B2B 产品经验")],
+      { tokens: new Set(), yearsExperience: 8 }
+    );
+
+    expect(result).toEqual({ criterionId: "c1", status: "unknown", evidence: [] });
+  });
+
+  it("does not satisfy a compound criterion when one clause is unsupported", () => {
+    const [result] = evaluateObjectiveRules(
+      [criterion("必须本科且有海外经验")],
+      { tokens: new Set(), educationLevel: "bachelor" }
+    );
+
+    expect(result).toEqual({ criterionId: "c1", status: "unknown", evidence: [] });
+  });
+
   it("matches explicit location and certificate tokens", () => {
     const results = evaluateObjectiveRules(
       [criterion("工作地点：上海"), { ...criterion("必须持有 PMP"), id: "c2" }],
