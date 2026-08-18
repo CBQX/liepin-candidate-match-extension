@@ -46,8 +46,20 @@ export async function analyzeCandidate(
   const criteria = parseJobCriteria(request.job);
   const facts = extractObjectiveFacts(cleanCandidate);
   const ruleEvaluations = evaluateObjectiveRules(criteria, facts);
+  const providerRuleEvaluations = ruleEvaluations.map((ruleEvaluation) =>
+    ruleEvaluation.status === "unknown"
+      ? { ...ruleEvaluation, evidence: [] }
+      : ruleEvaluation
+  );
   const modelResult = await deps.provider.analyze(
-    { job: request.job, candidateDraft: cleanCandidate, criteria, ruleEvaluations },
+    {
+      job: request.job,
+      candidateDraft: cleanCandidate,
+      criteria,
+      // Unknown-status source evidence is recruiter-only compensation. The provider
+      // already receives the redacted draft and must not use this local UI metadata.
+      ruleEvaluations: providerRuleEvaluations
+    },
     deps.settings,
     deps.signal
   );

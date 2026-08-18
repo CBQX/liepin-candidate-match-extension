@@ -126,11 +126,11 @@ describe("AnalysisResult", () => {
     expect(screen.getByText("建议推进，电话中优先核实地点意愿与团队规模。")).toBeTruthy();
   });
 
-  it("preserves sanitized local evidence when the provider omits every breaker clause", async () => {
+  it("isolates local evidence from an adversarial provider while preserving it for recruiters", async () => {
     const breakerJob: Job = {
       ...job,
       jd: "必须有 5 年以上经验",
-      customRequirements: "必须工作地点：上海\n必须持有 PMP"
+      customRequirements: "必须工作地点：上海\n必须持有 PMP\n必须本科"
     };
     const sensitiveDraft: CandidateDraft = {
       basics: {
@@ -150,6 +150,12 @@ describe("AnalysisResult", () => {
       other: { text: "", status: "missing" },
       extractionConfidence: "high"
     };
+    const draftWithoutLocalEvidence: CandidateDraft = {
+      ...sensitiveDraft,
+      basics: { text: "姓名：李四，手机 13912345678", status: "complete" },
+      workExperience: { text: "负责企业软件产品", status: "complete" },
+      skills: { text: "需求分析", status: "complete" }
+    };
     const providerOmission: ModelMatchResult = {
       dimensionScores: analysis.dimensionScores.map(({ dimensionId }) => ({
         dimensionId,
@@ -164,7 +170,18 @@ describe("AnalysisResult", () => {
       outreachAdvice: [],
       recruiterConclusion: "请由猎头结合候选人来源证据核实"
     };
-    const providerAnalyze = vi.fn<ModelProvider["analyze"]>().mockResolvedValue(providerOmission);
+    const providerAnalyze = vi.fn<ModelProvider["analyze"]>().mockImplementation(async (input) => {
+      const sawRecruiterOnlyEvidence = input.ruleEvaluations.some(
+        ({ status, evidence }) => status === "unknown" && evidence.length > 0
+      );
+      return {
+        ...providerOmission,
+        dimensionScores: providerOmission.dimensionScores.map((dimension) => ({
+          ...dimension,
+          score: sawRecruiterOnlyEvidence ? 10 : 80
+        }))
+      };
+    });
     const provider: ModelProvider = {
       id: "deepseek",
       models: [],
@@ -176,6 +193,15 @@ describe("AnalysisResult", () => {
       job: breakerJob,
       candidateDraft: sensitiveDraft,
       redactionContext: detectCandidateRedactionContext(sensitiveDraft.basics.text)
+    }, {
+      provider,
+      settings: { providerId: "deepseek", model: "deepseek-v4-pro", apiKey: "sk-test" },
+      redact: redactCandidateDraft
+    });
+    const composedWithoutLocalEvidence = await analyzeCandidate({
+      job: breakerJob,
+      candidateDraft: draftWithoutLocalEvidence,
+      redactionContext: detectCandidateRedactionContext(draftWithoutLocalEvidence.basics.text)
     }, {
       provider,
       settings: { providerId: "deepseek", model: "deepseek-v4-pro", apiKey: "sk-test" },
@@ -194,6 +220,11 @@ describe("AnalysisResult", () => {
         evidence: ["技能：候选人已持有 PMP，[已移除]"]
       },
       {
+        criterionId: "custom-3",
+        status: "met" as const,
+        evidence: ["明确学历：本科"]
+      },
+      {
         criterionId: "jd-1",
         status: "unknown" as const,
         evidence: ["工作经历：候选人拥有 8 年工作经验，简历ID：[已移除]"]
@@ -201,9 +232,39 @@ describe("AnalysisResult", () => {
     ];
     expect(providerOmission.matches).toEqual([]);
     expect(providerOmission.missingInformation).toEqual([]);
-    expect(providerAnalyze.mock.calls[0]?.[0].ruleEvaluations).toEqual(expectedHardRequirements);
+    for (const [providerInput] of providerAnalyze.mock.calls) {
+      expect(providerInput.ruleEvaluations).toEqual([
+        { criterionId: "custom-1", status: "unknown", evidence: [] },
+        { criterionId: "custom-2", status: "unknown", evidence: [] },
+        { criterionId: "custom-3", status: "met", evidence: ["明确学历：本科"] },
+        { criterionId: "jd-1", status: "unknown", evidence: [] }
+      ]);
+    }
     expect(composed.hardRequirements).toEqual(expectedHardRequirements);
+    expect(composedWithoutLocalEvidence.hardRequirements).toEqual([
+      { criterionId: "custom-1", status: "unknown", evidence: [] },
+      { criterionId: "custom-2", status: "unknown", evidence: [] },
+      { criterionId: "custom-3", status: "met", evidence: ["明确学历：本科"] },
+      { criterionId: "jd-1", status: "unknown", evidence: [] }
+    ]);
+    expect({
+      overallScore: composed.overallScore,
+      confidence: composed.confidence,
+      recommendation: composed.recommendation
+    }).toEqual({
+      overallScore: composedWithoutLocalEvidence.overallScore,
+      confidence: composedWithoutLocalEvidence.confidence,
+      recommendation: composedWithoutLocalEvidence.recommendation
+    });
+    expect(composed).toMatchObject({
+      overallScore: 80,
+      confidence: "low",
+      recommendation: "recommend"
+    });
     expect(JSON.stringify(composed)).not.toMatch(/张三|13812345678|123456|liepin\.com|candidate\/secret/u);
+    expect(JSON.stringify(providerAnalyze.mock.calls)).not.toMatch(
+      /张三|李四|13812345678|13912345678|123456|liepin\.com|candidate\/secret/u
+    );
 
     render(<AnalysisResult analysis={composed} job={breakerJob} />);
     for (const [criterionText, sourceEvidence] of [

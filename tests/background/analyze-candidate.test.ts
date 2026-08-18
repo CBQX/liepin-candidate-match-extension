@@ -116,6 +116,19 @@ describe("analyzeCandidate", () => {
       {
         criterionId: "custom-1",
         status: "unknown",
+        evidence: []
+      },
+      { criterionId: "custom-2", status: "met", evidence: ["明确学历：本科"] },
+      {
+        criterionId: "jd-1",
+        status: "unknown",
+        evidence: []
+      }
+    ]);
+    expect(analysis.hardRequirements).toEqual([
+      {
+        criterionId: "custom-1",
+        status: "unknown",
         evidence: ["基本信息：现居地：上海"]
       },
       { criterionId: "custom-2", status: "met", evidence: ["明确学历：本科"] },
@@ -125,7 +138,6 @@ describe("analyzeCandidate", () => {
         evidence: ["工作经历：明确 8 年工作经验"]
       }
     ]);
-    expect(analysis.hardRequirements).toEqual(input.ruleEvaluations);
     expect(analysis).toMatchObject({
       overallScore: 80,
       recommendation: "recommend",
