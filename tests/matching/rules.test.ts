@@ -45,7 +45,7 @@ describe("evaluateObjectiveRules", () => {
     expect(notMet).toEqual({ criterionId: "c1", status: "not_met", evidence: ["明确学历：大专"] });
   });
 
-  it("compares explicit years of experience without treating absence as failure", () => {
+  it("keeps explicit years of experience unknown even when a sufficient fact was extracted", () => {
     const [met] = evaluateObjectiveRules(
       [criterion("必须有 5 年以上经验")],
       {
@@ -58,8 +58,17 @@ describe("evaluateObjectiveRules", () => {
       [criterion("必须有 5 年以上经验")],
       { tokens: new Set() }
     );
+    const [belowThreshold] = evaluateObjectiveRules(
+      [criterion("必须有 5 年以上经验")],
+      {
+        tokens: new Set(),
+        yearsExperience: 3,
+        yearsExperienceEvidence: "工作经历：工作经验：3 年"
+      }
+    );
 
-    expect(met).toEqual({ criterionId: "c1", status: "met", evidence: ["工作经历：工作经验：8 年"] });
+    expect(met).toEqual({ criterionId: "c1", status: "unknown", evidence: [] });
+    expect(belowThreshold).toEqual({ criterionId: "c1", status: "unknown", evidence: [] });
     expect(unknown?.status).toBe("unknown");
   });
 
@@ -91,7 +100,7 @@ describe("evaluateObjectiveRules", () => {
     expect(result).toEqual({ criterionId: "c1", status: "unknown", evidence: [] });
   });
 
-  it("matches an explicit certificate token", () => {
+  it("keeps an explicit certificate unknown even when a possession fact was extracted", () => {
     const [result] = evaluateObjectiveRules(
       [criterion("必须持有 PMP")],
       {
@@ -101,11 +110,7 @@ describe("evaluateObjectiveRules", () => {
       }
     );
 
-    expect(result).toEqual({
-      criterionId: "c1",
-      status: "met",
-      evidence: ["技能：持有 PMP 证书"]
-    });
+    expect(result).toEqual({ criterionId: "c1", status: "unknown", evidence: [] });
   });
 
   it("does not treat customer years or a training-project certificate mention as candidate possession", () => {
@@ -124,19 +129,22 @@ describe("evaluateObjectiveRules", () => {
     ]);
   });
 
-  it("uses labeled candidate years and possession language as auditable evidence", () => {
-    // Break caught: making rules conservative must not discard explicit candidate-owned facts.
+  it("retains labeled candidate years and possession facts without using them as deterministic gates", () => {
+    // Break caught: the Stage C safety breaker must preserve model/recruiter evidence while
+    // preventing ambiguous years and credentials from satisfying hard rules locally.
     const facts = extractObjectiveFacts(draftWith({
       workExperience: "工作经验：8 年；负责企业软件产品",
       skills: "证书：PMP；持有法律职业资格"
     }));
 
+    expect(facts.yearsExperienceEvidence).toBe("工作经历：工作经验：8 年");
+    expect(facts.tokenEvidence?.get("pmp")).toEqual(["技能：证书：PMP"]);
     expect(evaluateObjectiveRules([
       criterion("必须有 5 年以上经验"),
       { ...criterion("必须持有 PMP"), id: "c2" }
     ], facts)).toEqual([
-      { criterionId: "c1", status: "met", evidence: ["工作经历：工作经验：8 年"] },
-      { criterionId: "c2", status: "met", evidence: ["技能：证书：PMP"] }
+      { criterionId: "c1", status: "unknown", evidence: [] },
+      { criterionId: "c2", status: "unknown", evidence: [] }
     ]);
   });
 
@@ -182,11 +190,7 @@ describe("evaluateObjectiveRules", () => {
 
     expect(facts.yearsExperience).toBe(5);
     expect(facts.yearsExperienceEvidence).toBe("工作经历：拥有 5 年工作经验");
-    expect(result).toEqual({
-      criterionId: "c1",
-      status: "met",
-      evidence: ["工作经历：拥有 5 年工作经验"]
-    });
+    expect(result).toEqual({ criterionId: "c1", status: "unknown", evidence: [] });
   });
 
   it.each([
@@ -219,19 +223,15 @@ describe("evaluateObjectiveRules", () => {
   it.each([
     "已持有 PMP",
     "已通过 PMP"
-  ])("keeps a clear current credential clause positive: %s", (source) => {
-    // Break caught: clause qualification must reject denial/planning/invalidity without
-    // downgrading explicit current candidate possession.
+  ])("retains a clear current credential fact but keeps the hard rule unknown: %s", (source) => {
+    // Break caught: explicit possession remains provider/recruiter evidence, but credentials
+    // cannot satisfy a deterministic hard rule in Stage C.
     const facts = extractObjectiveFacts(draftWith({ skills: source }));
     const [result] = evaluateObjectiveRules([criterion("必须持有 PMP")], facts);
 
     expect(facts.tokens.has("pmp")).toBe(true);
     expect(facts.tokenEvidence?.get("pmp")).toEqual([`技能：${source}`]);
-    expect(result).toEqual({
-      criterionId: "c1",
-      status: "met",
-      evidence: [`技能：${source}`]
-    });
+    expect(result).toEqual({ criterionId: "c1", status: "unknown", evidence: [] });
   });
 
   it("retains the complete source fragment for clear positive experience and credential evidence", () => {
@@ -242,21 +242,70 @@ describe("evaluateObjectiveRules", () => {
       skills: "本人已通过 PMP 认证，证书当前有效"
     }));
 
+    expect(facts.yearsExperience).toBe(8);
+    expect(facts.yearsExperienceEvidence).toBe("工作经历：本人拥有 8 年以上工作经验，专注企业软件产品");
+    expect(facts.tokens.has("pmp")).toBe(true);
+    expect(facts.tokenEvidence?.get("pmp")).toEqual(["技能：本人已通过 PMP 认证，证书当前有效"]);
     expect(evaluateObjectiveRules([
       criterion("必须有 5 年以上经验"),
       { ...criterion("必须持有 PMP"), id: "c2" }
     ], facts)).toEqual([
-      {
-        criterionId: "c1",
-        status: "met",
-        evidence: ["工作经历：本人拥有 8 年以上工作经验，专注企业软件产品"]
-      },
-      {
-        criterionId: "c2",
-        status: "met",
-        evidence: ["技能：本人已通过 PMP 认证，证书当前有效"]
-      }
+      { criterionId: "c1", status: "unknown", evidence: [] },
+      { criterionId: "c2", status: "unknown", evidence: [] }
     ]);
+  });
+
+  it.each([
+    "拥有 5 年工作经验",
+    "明确 8 年工作经验",
+    "不到 5 年工作经验",
+    "不足 5 年工作经验",
+    "不满 5 年工作经验",
+    "拥有 3–5 年工作经验",
+    "工作经验：3 至 5 年",
+    "最多 5 年工作经验",
+    "最多有 5 年工作经验",
+    "最多拥有 5 年工作经验",
+    "至多具备 5 年工作经验",
+    "不超过累计 5 年工作经验",
+    "少于拥有 5 年工作经验",
+    "低于具备 5 年工作经验",
+    "未满累计 5 年工作经验",
+    "5 年以下工作经验"
+  ])("always keeps years_experience hard-rule evaluation unknown: %s", (source) => {
+    const facts = extractObjectiveFacts(draftWith({ workExperience: source }));
+
+    expect(evaluateObjectiveRules(
+      [criterion("必须有 5 年以上经验")],
+      facts
+    )).toEqual([{ criterionId: "c1", status: "unknown", evidence: [] }]);
+  });
+
+  it.each([
+    "已持有 PMP",
+    "已通过 PMP",
+    "未通过 PMP",
+    "不具备 PMP 证书",
+    "PMP 尚未通过",
+    "未持有 PMP",
+    "没有 PMP 证书",
+    "未取得 PMP",
+    "计划考取 PMP",
+    "准备考 PMP",
+    "打算考取 PMP",
+    "拟考取 PMP",
+    "待通过 PMP",
+    "已过期 PMP",
+    "PMP 已过期",
+    "PMP 认证已经失效",
+    "PMP 证书已经作废"
+  ])("always keeps certificate hard-rule evaluation unknown: %s", (source) => {
+    const facts = extractObjectiveFacts(draftWith({ skills: source }));
+
+    expect(evaluateObjectiveRules(
+      [criterion("必须持有 PMP")],
+      facts
+    )).toEqual([{ criterionId: "c1", status: "unknown", evidence: [] }]);
   });
 
   it.each(["和田", "共和"])("keeps the explicit %s location unknown without misparsing its characters", (location) => {

@@ -116,14 +116,9 @@ const evaluateCriterion = (criterion: JobCriterion, facts: ObjectiveFacts): Rule
     ? requiredYears(criterion.text)
     : undefined;
   if (years !== undefined) {
-    if (facts.yearsExperience === undefined || !facts.yearsExperienceEvidence) {
-      return evaluation(criterion.id, "unknown");
-    }
-    return evaluation(
-      criterion.id,
-      facts.yearsExperience >= years ? "met" : "not_met",
-      [facts.yearsExperienceEvidence]
-    );
+    // Stage C safety breaker: natural-language tenure cannot be proven safely enough
+    // for a deterministic hard gate. Keep extracted facts for provider/recruiter evidence.
+    return evaluation(criterion.id, "unknown");
   }
 
   const location = parseSupportedLocation(criterion.text);
@@ -133,11 +128,9 @@ const evaluateCriterion = (criterion: JobCriterion, facts: ObjectiveFacts): Rule
 
   const token = requiredToken(criterion.text);
   if (token && isSupportedTokenCriterion(criterion.text, token[2])) {
-    const [normalized] = token;
-    const evidence = facts.tokenEvidence?.get(normalized) ?? [];
-    return facts.tokens.has(normalized) && evidence.length > 0
-      ? evaluation(criterion.id, "met", evidence)
-      : evaluation(criterion.id, "unknown");
+    // Stage C safety breaker: a credential mention is not a maintained, verified
+    // credential record, so it can inform analysis but never a deterministic hard gate.
+    return evaluation(criterion.id, "unknown");
   }
 
   return evaluation(criterion.id, "unknown");

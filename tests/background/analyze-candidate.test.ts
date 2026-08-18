@@ -115,12 +115,12 @@ describe("analyzeCandidate", () => {
     expect(input.ruleEvaluations).toEqual([
       { criterionId: "custom-1", status: "unknown", evidence: [] },
       { criterionId: "custom-2", status: "met", evidence: ["明确学历：本科"] },
-      { criterionId: "jd-1", status: "met", evidence: ["工作经历：明确 8 年工作经验"] }
+      { criterionId: "jd-1", status: "unknown", evidence: [] }
     ]);
     expect(analysis).toMatchObject({
       overallScore: 80,
       recommendation: "recommend",
-      confidence: "medium",
+      confidence: "low",
       recruiterConclusion: "建议推进并核实地点意愿"
     });
   });

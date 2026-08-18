@@ -91,6 +91,12 @@ describe("AnalysisResult", () => {
     expect(within(educationRequirement).getByText("候选人明确为本科")).toBeTruthy();
     const locationRequirement = screen.getByText("必须工作地点：上海").closest("li")!;
     expect(within(locationRequirement).getByText("未知")).toBeTruthy();
+    expect(screen.getByText(
+      "阶段 C 中，地点、工作年限和证书仅供模型分析与猎头核实；这三类在确定性硬条件核对中始终显示“未知”。"
+    )).toBeTruthy();
+    expect(screen.getByText(
+      "自然语言履历可能包含范围、否定、计划或有效期语义，因此不用于自动满足、淘汰或降级。"
+    )).toBeTruthy();
 
     const claimEvidence = [
       ["企业软件经验匹配", "岗位要求企业软件产品经验", "候选人负责过 SaaS 产品"],
