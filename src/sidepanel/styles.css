@@ -1,3 +1,226 @@
+:root {
+  color: #182019;
+  background: #f4f6ef;
+  font-family: Inter, "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-synthesis: none;
+}
+
+* {
+  box-sizing: border-box;
+}
+
 body {
   margin: 0;
+  min-width: 320px;
+  background:
+    radial-gradient(circle at 100% 0, rgb(222 235 213 / 65%), transparent 38%),
+    #f4f6ef;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button,
+select,
+input[type="checkbox"] {
+  cursor: pointer;
+}
+
+.app-shell {
+  display: grid;
+  gap: 16px;
+  padding: 24px 18px 32px;
+}
+
+.app-header h1,
+.panel-card h2 {
+  margin: 0;
+  letter-spacing: -0.03em;
+}
+
+.app-header h1 {
+  font-size: 25px;
+}
+
+.brand-kicker,
+.eyebrow {
+  margin: 0 0 5px;
+  color: #337044;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+
+.panel-card,
+.job-toolbar {
+  border: 1px solid #dce4d7;
+  border-radius: 14px;
+  background: rgb(255 255 253 / 94%);
+  box-shadow: 0 12px 32px rgb(43 65 46 / 8%);
+}
+
+.panel-card {
+  padding: 20px;
+}
+
+.panel-card h2 {
+  font-size: 20px;
+  line-height: 1.3;
+}
+
+.muted,
+.field-hint,
+.loading-state {
+  color: #687169;
+  line-height: 1.6;
+}
+
+.muted {
+  margin: 8px 0 18px;
+  font-size: 13px;
+}
+
+.form-stack {
+  display: grid;
+  gap: 12px;
+}
+
+.form-stack label,
+.job-toolbar label {
+  display: grid;
+  gap: 6px;
+  color: #364039;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+input,
+select,
+textarea {
+  width: 100%;
+  border: 1px solid #cbd5c9;
+  border-radius: 9px;
+  background: #fff;
+  color: #182019;
+  outline: none;
+}
+
+input,
+select {
+  min-height: 42px;
+  padding: 0 11px;
+}
+
+textarea {
+  min-height: 90px;
+  padding: 10px 11px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: #438357;
+  box-shadow: 0 0 0 3px rgb(67 131 87 / 14%);
+}
+
+input[aria-invalid="true"],
+textarea[aria-invalid="true"] {
+  border-color: #ba443b;
+}
+
+.checkbox-row {
+  display: flex !important;
+  align-items: center;
+  gap: 8px !important;
+}
+
+.checkbox-row input {
+  width: 17px;
+  min-height: 17px;
+}
+
+.field-error,
+.form-error,
+.field-hint {
+  margin: -7px 0 0;
+  font-size: 12px;
+}
+
+.field-error,
+.form-error {
+  color: #a8342f;
+}
+
+.form-error {
+  margin: 0;
+  border-radius: 8px;
+  background: #fff0ee;
+  padding: 10px;
+  line-height: 1.5;
+}
+
+.primary-button,
+.secondary-button {
+  min-height: 42px;
+  border-radius: 9px;
+  padding: 0 14px;
+  font-weight: 800;
+}
+
+.primary-button {
+  border: 1px solid #235e37;
+  background: #2f7045;
+  color: #fff;
+}
+
+.secondary-button {
+  border: 1px solid #bdd0bd;
+  background: #f8fbf5;
+  color: #2d613d;
+}
+
+button:disabled,
+select:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.job-toolbar {
+  display: grid;
+  gap: 10px;
+  padding: 13px;
+}
+
+.ready-card {
+  text-align: center;
+}
+
+.ready-mark {
+  display: grid;
+  width: 46px;
+  height: 46px;
+  margin: 0 auto 13px;
+  place-items: center;
+  border-radius: 50%;
+  background: #deeddb;
+  color: #28663c;
+  font-size: 24px;
+  font-weight: 900;
+}
+
+.ready-card .primary-button {
+  width: 100%;
+}
+
+.loading-state {
+  margin: 20px 0;
+  text-align: center;
+  font-size: 13px;
 }
