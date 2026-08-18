@@ -46,7 +46,7 @@ function escapeRegExp(value: string): string {
 function redactClearPersonReferences(text: string, confirmedToken: string): string {
   const token = escapeRegExp(confirmedToken);
   const personReferencePattern = new RegExp(
-    `(^|[\uff0c,\u3002\uff1b;\uff1a:\uff01!\uff1f?\\n\\r])([\\t ]*)${token}(?=\\s*(?:\u4e8e|\u66fe\u4efb|\u52a0\u5165|\u62c5\u4efb|\u4efb\u804c|\u73b0\u4efb))`,
+    `(^|[\uff0c,\u3002\uff1b;\uff1a:\uff01!\uff1f?\\s\u3001\u2022\uff08(|\uff5c])([\\t ]*)${token}(?=\\s*(?:\u4e8e|\u66fe\u4efb|\u52a0\u5165|\u62c5\u4efb|\u4efb\u804c|\u73b0\u4efb))`,
     "gu"
   );
 

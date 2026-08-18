@@ -56,6 +56,48 @@ describe("candidate redaction", () => {
   });
 
   it.each([
+    ["1、李小明曾任乙公司技术负责人", "1、候选人曾任乙公司技术负责人"],
+    ["• 李小明曾任乙公司技术负责人", "• 候选人曾任乙公司技术负责人"],
+    ["（李小明曾任乙公司技术负责人）", "（候选人曾任乙公司技术负责人）"],
+    ["经历 | 李小明曾任乙公司技术负责人", "经历 | 候选人曾任乙公司技术负责人"]
+  ])("redacts a confirmed name after a structured boundary in %s", (source, expected) => {
+    // Break caught: list and layout separators copied from a profile could prevent a clear person reference from being redacted.
+    const draft = candidateDraftWith("姓名：李小明 年龄 31");
+    draft.workExperience.text = source;
+
+    const redacted = redactCandidateDraft(draft);
+
+    expect(redacted.workExperience.text).toBe(expected);
+  });
+
+  it("redacts repeated confirmed-name references after collapsed whitespace", () => {
+    // Break caught: whitespace collapsed from separate profile rows could leak later repeated references.
+    const draft = candidateDraftWith("姓名：李小明 年龄 31");
+    draft.workExperience.text = "李小明曾任甲公司产品经理 李小明现任乙公司技术负责人";
+
+    const redacted = redactCandidateDraft(draft);
+
+    expect(redacted.workExperience.text).toBe("候选人曾任甲公司产品经理 候选人现任乙公司技术负责人");
+  });
+
+  it.each([
+    "1、李小明品牌项目负责人",
+    "• 李小明零售业务增长",
+    "（李小明路负责区域招聘）",
+    "经历 | 李小明项目获得奖项",
+    "经历 李小明品牌项目负责人",
+    "• 大李小明曾任乙公司技术负责人"
+  ])("preserves a confirmed token without a person predicate in %s", (source) => {
+    // Break caught: widening left boundaries must not turn brand, location, or object phrases into person references.
+    const draft = candidateDraftWith("姓名：李小明 年龄 31");
+    draft.workExperience.text = source;
+
+    const redacted = redactCandidateDraft(draft);
+
+    expect(redacted.workExperience.text).toBe(source);
+  });
+
+  it.each([
     "+86 138 1234 5678",
     "138-1234-5678",
     "+86-138-1234-5678",
