@@ -1,10 +1,19 @@
 import { createBackgroundController } from "./controller";
 import { runtimeRequestSchema } from "../shared/contracts/messages";
+import { ChromeProviderSettingsRepository } from "../repositories/chrome-provider-settings";
+import { DeepSeekProvider } from "../providers/deepseek/deepseek-provider";
+import { ModelProviderRegistry } from "../providers/model-provider";
 
 const unknownRequestResponse = {
   ok: false as const,
   error: { code: "UNKNOWN" as const, message: "无法识别的插件请求。" }
 };
+
+const providerSettings = new ChromeProviderSettingsRepository(
+  chrome.storage.local,
+  chrome.storage.session
+);
+const providers = new ModelProviderRegistry([new DeepSeekProvider()]);
 
 const controller = createBackgroundController({
   async getActiveTab() {
@@ -13,6 +22,12 @@ const controller = createBackgroundController({
   },
   sendToTab(tabId, request) {
     return chrome.tabs.sendMessage(tabId, request);
+  },
+  loadProviderSettings() {
+    return providerSettings.load();
+  },
+  resolveProvider(providerId) {
+    return providers.get(providerId);
   }
 });
 
