@@ -123,6 +123,61 @@ describe("DeepSeekProvider", () => {
     );
   });
 
+  it("rejects validation when the selected model is absent from the provider model list", async () => {
+    // Break caught: treating any successful /models response as valid could save a model the account cannot use.
+    const fetcher = vi.fn<Fetcher>().mockResolvedValue(new Response(JSON.stringify({
+      object: "list",
+      data: [{ id: "deepseek-v4-flash", object: "model", owned_by: "deepseek" }]
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
+
+    const error = await caught(new DeepSeekProvider(fetcher).validateCredentials(settings));
+
+    expect(mapProviderError(error)).toMatchObject({
+      code: "MODEL_UNAVAILABLE",
+      message: expect.stringMatching(/所选模型.*不可用/u)
+    });
+  });
+
+  it.each([400, 404, 422])("maps HTTP %s to an actionable invalid-request error", async (status) => {
+    // Break caught: a rejected request mapped to UNKNOWN would hide a configuration or compatibility problem.
+    const fetcher = vi.fn<Fetcher>().mockResolvedValue(
+      apiError(status, "invalid_request", "Request rejected")
+    );
+
+    const error = await caught(new DeepSeekProvider(fetcher).validateCredentials(settings));
+
+    expect(mapProviderError(error)).toMatchObject({
+      code: "INVALID_PROVIDER_REQUEST",
+      message: expect.stringMatching(/拒绝.*请求/u)
+    });
+  });
+
+  it.each([500, 503])("maps HTTP %s to an actionable provider-service error", async (status) => {
+    // Break caught: a provider outage mapped to UNKNOWN gives no useful distinction from a local network failure.
+    const fetcher = vi.fn<Fetcher>().mockResolvedValue(
+      apiError(status, "service_unavailable", "Provider unavailable")
+    );
+
+    const error = await caught(new DeepSeekProvider(fetcher).validateCredentials(settings));
+
+    expect(mapProviderError(error)).toMatchObject({
+      code: "PROVIDER_SERVICE_UNAVAILABLE",
+      message: expect.stringMatching(/故障或繁忙/u)
+    });
+  });
+
+  it("maps a failed fetch to an actionable network error", async () => {
+    // Break caught: DNS, proxy, firewall, and browser fetch failures must not collapse into an opaque UNKNOWN error.
+    const fetcher = vi.fn<Fetcher>().mockRejectedValue(new TypeError("Failed to fetch"));
+
+    const error = await caught(new DeepSeekProvider(fetcher).validateCredentials(settings));
+
+    expect(mapProviderError(error)).toMatchObject({
+      code: "NETWORK_FAILED",
+      message: expect.stringMatching(/网络、代理或防火墙/u)
+    });
+  });
+
   it("requests strict JSON analysis with the selected V4 model", async () => {
     // Break caught: losing any DeepSeek JSON-mode parameter could return prose or use the wrong cost/quality model.
     const fetcher = vi.fn<Fetcher>().mockResolvedValue(completion(JSON.stringify(modelResult)));
@@ -268,6 +323,17 @@ describe("DeepSeekProvider", () => {
 
     expect(mapProviderError(error)).toMatchObject({ code: "INSUFFICIENT_BALANCE" });
     expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("recognizes an insufficient-balance payload even when the provider uses HTTP 400", async () => {
+    // Break caught: checking generic 4xx before the provider error payload could mislabel a billing recovery action.
+    const fetcher = vi.fn<Fetcher>().mockResolvedValue(
+      apiError(400, "insufficient_balance", "Insufficient Balance")
+    );
+
+    const error = await caught(new DeepSeekProvider(fetcher).validateCredentials(settings));
+
+    expect(mapProviderError(error)).toMatchObject({ code: "INSUFFICIENT_BALANCE" });
   });
 
   it("aborts before 30 seconds when response headers do not arrive", async () => {

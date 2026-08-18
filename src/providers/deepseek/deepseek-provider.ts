@@ -36,7 +36,25 @@ function errorCodeFromResponse(status: number, payload: unknown): AppErrorCode {
   if (details.includes("insufficient_balance") || details.includes("insufficient balance") || details.includes("余额不足")) {
     return "INSUFFICIENT_BALANCE";
   }
+  if (status >= 500) return "PROVIDER_SERVICE_UNAVAILABLE";
+  if (status >= 400) return "INVALID_PROVIDER_REQUEST";
   return "UNKNOWN";
+}
+
+function modelIdsFromResponse(payload: unknown): string[] | undefined {
+  if (typeof payload !== "object" || payload === null || !("data" in payload)) {
+    return undefined;
+  }
+
+  const data = (payload as { data?: unknown }).data;
+  if (!Array.isArray(data)) return undefined;
+
+  const ids = data.flatMap((entry) => {
+    if (typeof entry !== "object" || entry === null) return [];
+    const id = (entry as { id?: unknown }).id;
+    return typeof id === "string" && id.trim() !== "" ? [id] : [];
+  });
+  return ids.length === data.length ? ids : undefined;
 }
 
 async function providerErrorFromResponse(response: Response): Promise<NormalizedProviderError> {
@@ -95,6 +113,20 @@ export class DeepSeekProvider implements ModelProvider {
     }, async (response) => {
       if (!response.ok) {
         throw await providerErrorFromResponse(response);
+      }
+
+      let payload: unknown;
+      try {
+        payload = await response.json();
+      } catch {
+        throw new NormalizedProviderError("PROVIDER_SERVICE_UNAVAILABLE");
+      }
+      const modelIds = modelIdsFromResponse(payload);
+      if (!modelIds) {
+        throw new NormalizedProviderError("PROVIDER_SERVICE_UNAVAILABLE");
+      }
+      if (!modelIds.includes(settings.model)) {
+        throw new NormalizedProviderError("MODEL_UNAVAILABLE");
       }
     });
   }
@@ -209,6 +241,9 @@ export class DeepSeekProvider implements ModelProvider {
         throw new NormalizedProviderError(
           abortReason === "cancelled" ? "ANALYSIS_CANCELLED" : "MODEL_TIMEOUT"
         );
+      }
+      if (error instanceof TypeError) {
+        throw new NormalizedProviderError("NETWORK_FAILED");
       }
       throw error;
     } finally {
