@@ -13,4 +13,40 @@ describe("extension manifest", () => {
       "https://api.deepseek.com/*"
     ]);
   });
+
+  it("does not request broad browsing or wildcard host access", async () => {
+    // Break caught: a future manifest edit could silently widen access beyond the
+    // user-opened Liepin page and the DeepSeek API required by this MVP.
+    const raw = await readFile("public/manifest.json", "utf8");
+    const manifest = JSON.parse(raw) as {
+      permissions?: string[];
+      optional_permissions?: string[];
+      host_permissions?: string[];
+      optional_host_permissions?: string[];
+    };
+    const forbiddenPermissions = [
+      "tabs",
+      "history",
+      "cookies",
+      "webRequest",
+      "unlimitedStorage"
+    ];
+    const wildcardHosts = ["<all_urls>", "*://*/*", "http://*/*", "https://*/*"];
+
+    const requestedPermissions = [
+      ...(manifest.permissions ?? []),
+      ...(manifest.optional_permissions ?? [])
+    ];
+    const requestedHosts = [
+      ...(manifest.host_permissions ?? []),
+      ...(manifest.optional_host_permissions ?? [])
+    ];
+
+    expect(requestedPermissions).not.toEqual(
+      expect.arrayContaining(forbiddenPermissions)
+    );
+    expect(requestedHosts).not.toEqual(
+      expect.arrayContaining(wildcardHosts)
+    );
+  });
 });
