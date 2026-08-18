@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "../../src/sidepanel/App";
@@ -29,6 +29,14 @@ const extractedDraft: CandidateDraft = {
   other: { text: "", status: "missing" },
   extractionConfidence: "medium"
 };
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((nextResolve) => {
+    resolve = nextResolve;
+  });
+  return { promise, resolve };
+}
 
 function createDependencies() {
   let activeJob = jobA;
@@ -146,5 +154,78 @@ describe("candidate preview", () => {
     await user.click(screen.getByRole("button", { name: "匹配分析" }));
     expect(await screen.findByRole("button", { name: "确认并分析" })).toBeTruthy();
     expect(deps.extractCurrentCandidate).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(["job", "page", "session"] as const)(
+    "ignores an old extraction response after a %s boundary",
+    async (boundary) => {
+      // Break caught: a delayed content-script response could repopulate private state after its job/page/session was abandoned.
+      const deps = createDependencies();
+      const pending = deferred<Awaited<ReturnType<SidePanelDependencies["extractCurrentCandidate"]>>>();
+      deps.extractCurrentCandidate.mockImplementationOnce(() => pending.promise);
+      const user = userEvent.setup();
+      render(<App deps={deps} />);
+
+      await user.click(await screen.findByRole("button", { name: "匹配分析" }));
+      await waitFor(() => expect(deps.extractCurrentCandidate).toHaveBeenCalledTimes(1));
+
+      if (boundary === "job") {
+        await user.selectOptions(screen.getByRole("combobox", { name: "当前岗位" }), jobB.id);
+        await waitFor(() => expect(deps.jobs.activate).toHaveBeenCalledWith(jobB.id));
+      } else if (boundary === "page") {
+        deps.emitPageContextChanged();
+      } else {
+        fireEvent(window, new Event("beforeunload"));
+      }
+
+      await act(async () => {
+        pending.resolve({ ok: true, data: extractedDraft });
+        await pending.promise;
+      });
+
+      expect(screen.queryByRole("button", { name: "确认并分析" })).toBeNull();
+    }
+  );
+
+  it("keeps the newest extraction when concurrent retry responses finish out of order", async () => {
+    // Break caught: a slower prior request could overwrite the candidate selected by a newer explicit retry.
+    const deps = createDependencies();
+    const older = deferred<Awaited<ReturnType<SidePanelDependencies["extractCurrentCandidate"]>>>();
+    const newer = deferred<Awaited<ReturnType<SidePanelDependencies["extractCurrentCandidate"]>>>();
+    const newerDraft: CandidateDraft = {
+      ...extractedDraft,
+      workExperience: { text: "乙公司数据平台主管", status: "complete" }
+    };
+    deps.extractCurrentCandidate
+      .mockResolvedValueOnce({
+        ok: false,
+        error: { code: "UNSUPPORTED_PAGE", message: "请打开单个猎聘候选人详情页。" }
+      })
+      .mockImplementationOnce(() => older.promise)
+      .mockImplementationOnce(() => newer.promise);
+    const user = userEvent.setup();
+    render(<App deps={deps} />);
+
+    await user.click(await screen.findByRole("button", { name: "匹配分析" }));
+    const retry = await screen.findByRole("button", { name: "匹配分析" });
+    await act(async () => {
+      retry.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      retry.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(deps.extractCurrentCandidate).toHaveBeenCalledTimes(3);
+
+    await act(async () => {
+      newer.resolve({ ok: true, data: newerDraft });
+      await newer.promise;
+    });
+    expect((await screen.findByLabelText("工作经历") as HTMLTextAreaElement).value)
+      .toContain("乙公司数据平台主管");
+
+    await act(async () => {
+      older.resolve({ ok: true, data: extractedDraft });
+      await older.promise;
+    });
+    expect((screen.getByLabelText("工作经历") as HTMLTextAreaElement).value)
+      .toContain("乙公司数据平台主管");
   });
 });

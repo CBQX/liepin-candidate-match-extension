@@ -1,4 +1,4 @@
-import { useEffect, useReducer, useState } from "react";
+import { useEffect, useReducer, useRef, useState } from "react";
 import { JobService, type CreateJobInput } from "../domain/jobs/job-service";
 import type { ProviderSettings } from "../repositories/chrome-provider-settings";
 import { candidateDraftSchema } from "../shared/contracts/candidate";
@@ -36,6 +36,7 @@ export function App({ deps }: AppProps) {
     analysisSessionReducer,
     analysisSessionInitialState
   );
+  const extractionGeneration = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -62,10 +63,12 @@ export function App({ deps }: AppProps) {
 
   useEffect(() => {
     const clearForPageChange = () => {
+      extractionGeneration.current += 1;
       setExtractionError(undefined);
       dispatchAnalysisSession({ type: "PAGE_CHANGED" });
     };
     const endSession = () => {
+      extractionGeneration.current += 1;
       setExtractionError(undefined);
       dispatchAnalysisSession({ type: "SESSION_ENDED" });
     };
@@ -73,6 +76,7 @@ export function App({ deps }: AppProps) {
     window.addEventListener("beforeunload", endSession);
 
     return () => {
+      extractionGeneration.current += 1;
       unsubscribe();
       window.removeEventListener("beforeunload", endSession);
     };
@@ -97,6 +101,7 @@ export function App({ deps }: AppProps) {
 
   async function saveJob(input: CreateJobInput) {
     try {
+      extractionGeneration.current += 1;
       dispatchAnalysisSession({ type: "JOB_CHANGED" });
       setExtractionError(undefined);
       const savedJob = await new JobService(deps.jobs).createAndActivate(input);
@@ -115,6 +120,7 @@ export function App({ deps }: AppProps) {
     if (!selectedJob) return;
     setSwitchError("");
     setSwitchingJob(true);
+    extractionGeneration.current += 1;
     dispatchAnalysisSession({ type: "JOB_CHANGED" });
     setExtractionError(undefined);
     try {
@@ -130,9 +136,12 @@ export function App({ deps }: AppProps) {
   }
 
   async function matchAnalysis() {
+    const requestGeneration = extractionGeneration.current + 1;
+    extractionGeneration.current = requestGeneration;
     setExtractionError(undefined);
     try {
       const response = await deps.extractCurrentCandidate();
+      if (requestGeneration !== extractionGeneration.current) return undefined;
       if (!response.ok) {
         setExtractionError(response.error);
         return undefined;
@@ -153,6 +162,7 @@ export function App({ deps }: AppProps) {
       });
       return undefined;
     } catch {
+      if (requestGeneration !== extractionGeneration.current) return undefined;
       setExtractionError({
         code: "EXTRACTION_FAILED",
         message: "候选人信息读取失败，请重试。"
