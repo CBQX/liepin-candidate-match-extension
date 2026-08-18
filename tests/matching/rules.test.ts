@@ -77,6 +77,28 @@ describe("evaluateObjectiveRules", () => {
     ]);
   });
 
+  it.each(["和田", "共和"])("matches an explicit %s location without treating its characters as conjunctions", (location) => {
+    const [result] = evaluateObjectiveRules(
+      [criterion(`工作地点：${location}`)],
+      { tokens: new Set(), locations: new Set([location]) }
+    );
+
+    expect(result).toEqual({
+      criterionId: "c1",
+      status: "met",
+      evidence: [`明确地点：${location}`]
+    });
+  });
+
+  it("keeps compound location and availability wording unknown", () => {
+    const [result] = evaluateObjectiveRules(
+      [criterion("工作地点：上海且接受出差")],
+      { tokens: new Set(), locations: new Set(["上海且接受出差"]) }
+    );
+
+    expect(result).toEqual({ criterionId: "c1", status: "unknown", evidence: [] });
+  });
+
   it("does not infer availability from a different visible current location", () => {
     const [result] = evaluateObjectiveRules(
       [criterion("工作地点：上海")],

@@ -25,10 +25,16 @@ const isSupportedYearsCriterion = (text: string): boolean => new RegExp(
   "u"
 ).test(text.trim());
 
-const isSupportedLocationCriterion = (text: string): boolean => new RegExp(
-  String.raw`^${REQUIREMENT_PREFIX}(?:工作地点|办公地点|常驻地|所在地)\s*[:：]?\s*[^\s,，;；。|/且和]{2,20}$`,
-  "u"
-).test(text.trim());
+const isSupportedLocationCriterion = (text: string): boolean => {
+  const normalized = text.trim();
+  const hasUnsupportedClause = /(?:且|并且|同时|以及|和)\s*(?:接受|可|可以|能够|愿意|需|需要|有)/u
+    .test(normalized);
+
+  return !hasUnsupportedClause && new RegExp(
+    String.raw`^${REQUIREMENT_PREFIX}(?:工作地点|办公地点|常驻地|所在地)\s*[:：]?\s*[^\s,，;；。|/]{2,20}$`,
+    "u"
+  ).test(normalized);
+};
 
 const isSupportedTokenCriterion = (text: string, tokenPattern: RegExp): boolean => new RegExp(
   String.raw`^${REQUIREMENT_PREFIX}(?:(?:持有|具备|拥有|通过)\s*)?(?:${tokenPattern.source})(?:\s*(?:证书|认证|资格))?$`,
