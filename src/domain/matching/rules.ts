@@ -27,10 +27,17 @@ const isSupportedYearsCriterion = (text: string): boolean => new RegExp(
 
 const ADMINISTRATIVE_SUFFIX = /(?:特别行政区|自治区|自治州|自治县|自治旗|地区|林区|新区|开发区|盟|省|市|区|县|旗)$/u;
 const LOCATION_JOINERS = ["以及", "同时", "及", "与", "或", "并", "和", "且"] as const;
+const HAN_LOCATION_ATOM = /^[\p{Script=Han}]{2,20}$/u;
+const LATIN_LOCATION_ATOM = /^(?=.{2,20}$)\p{Script=Latin}+(?:[-'’]\p{Script=Latin}+)*$/u;
 
-const resemblesCompleteLocationName = (text: string): boolean => {
+const resemblesStandaloneHanLocation = (text: string): boolean => {
   const name = text.replace(ADMINISTRATIVE_SUFFIX, "");
-  return /^[\p{Script=Han}]{2,}$/u.test(name);
+  const hasAdministrativeSuffix = name !== text;
+
+  // This deliberately narrow grammar is only for deciding whether both sides
+  // of a connector are peer locations; the complete location atom may be longer.
+  return /^[\p{Script=Han}]{2,4}$/u.test(name)
+    || (hasAdministrativeSuffix && /^[\p{Script=Han}]{2,}$/u.test(name));
 };
 
 const hasJoinedLocationNames = (location: string): boolean => LOCATION_JOINERS.some((joiner) => {
@@ -38,7 +45,7 @@ const hasJoinedLocationNames = (location: string): boolean => LOCATION_JOINERS.s
   while (joinerIndex >= 0) {
     const before = location.slice(0, joinerIndex);
     const after = location.slice(joinerIndex + joiner.length);
-    if (resemblesCompleteLocationName(before) && resemblesCompleteLocationName(after)) {
+    if (resemblesStandaloneHanLocation(before) && resemblesStandaloneHanLocation(after)) {
       return true;
     }
     joinerIndex = location.indexOf(joiner, joinerIndex + joiner.length);
@@ -48,8 +55,8 @@ const hasJoinedLocationNames = (location: string): boolean => LOCATION_JOINERS.s
 
 const parseSupportedLocation = (text: string): string | undefined => {
   const match = text.trim().match(new RegExp(
-    String.raw`^${REQUIREMENT_PREFIX}(?:工作地点|办公地点|常驻地|所在地)\s*[:：]?\s*([\p{Script=Han}]{2,20})$`,
-    "u"
+    String.raw`^${REQUIREMENT_PREFIX}(?:工作地点|办公地点|常驻地|所在地|Location)\s*[:：]?\s*(.+)$`,
+    "iu"
   ));
   const location = match?.[1];
   if (!location) return undefined;
@@ -57,10 +64,13 @@ const parseSupportedLocation = (text: string): string | undefined => {
   const hasMobilityOrAvailabilityClause = /接受|愿意|需要|要求|出差|差旅|搬迁|迁居|调动|远程|居家|到岗|入职|驻场|异地|办公方式|办公模式/u
     .test(location);
 
-  return hasJoinedLocationNames(location)
-    || hasMobilityOrAvailabilityClause
-    ? undefined
-    : location;
+  if (HAN_LOCATION_ATOM.test(location)) {
+    return hasJoinedLocationNames(location) || hasMobilityOrAvailabilityClause
+      ? undefined
+      : location;
+  }
+
+  return LATIN_LOCATION_ATOM.test(location) ? location : undefined;
 };
 
 const isSupportedTokenCriterion = (text: string, tokenPattern: RegExp): boolean => new RegExp(
