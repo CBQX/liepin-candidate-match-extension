@@ -43,14 +43,30 @@ function isLiepinPage(url: string | undefined): boolean {
   }
 }
 
+async function loadSettings(
+  dependencies: BackgroundControllerDependencies
+): Promise<RuntimeResponse<ProviderSettings | undefined>> {
+  try {
+    return { ok: true, data: await dependencies.loadProviderSettings() };
+  } catch {
+    return {
+      ok: false,
+      error: mapProviderError({ code: "STORAGE_FAILED" })
+    };
+  }
+}
+
 export function createBackgroundController(
   dependencies: BackgroundControllerDependencies
 ): BackgroundController {
   return {
     async handle(request) {
       if (request.type === "VALIDATE_PROVIDER") {
+        const loadedSettings = await loadSettings(dependencies);
+        if (!loadedSettings.ok) return loadedSettings;
+
         try {
-          const settings = await dependencies.loadProviderSettings();
+          const settings = loadedSettings.data;
           if (!settings || settings.apiKey.trim() === "") {
             return {
               ok: false,
@@ -60,7 +76,10 @@ export function createBackgroundController(
 
           const provider = dependencies.resolveProvider(settings.providerId);
           if (!provider) {
-            return unknownRequest();
+            return {
+              ok: false,
+              error: mapProviderError({ code: "INVALID_PROVIDER_SETTINGS" })
+            };
           }
 
           await provider.validateCredentials(settings);
@@ -71,8 +90,11 @@ export function createBackgroundController(
       }
 
       if (request.type === "ANALYZE_CANDIDATE") {
+        const loadedSettings = await loadSettings(dependencies);
+        if (!loadedSettings.ok) return loadedSettings;
+
         try {
-          const settings = await dependencies.loadProviderSettings();
+          const settings = loadedSettings.data;
           if (!settings || settings.apiKey.trim() === "") {
             return {
               ok: false,
@@ -82,7 +104,10 @@ export function createBackgroundController(
 
           const provider = dependencies.resolveProvider(settings.providerId);
           if (!provider) {
-            return unknownRequest();
+            return {
+              ok: false,
+              error: mapProviderError({ code: "INVALID_PROVIDER_SETTINGS" })
+            };
           }
 
           const analysis = await analyzeCandidate(request, {

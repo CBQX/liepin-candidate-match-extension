@@ -3,6 +3,7 @@ import { runtimeRequestSchema } from "../shared/contracts/messages";
 import { ChromeProviderSettingsRepository } from "../repositories/chrome-provider-settings";
 import { DeepSeekProvider } from "../providers/deepseek/deepseek-provider";
 import { ModelProviderRegistry } from "../providers/model-provider";
+import { registerPageContextBroadcasts } from "./page-context";
 
 const unknownRequestResponse = {
   ok: false as const,
@@ -47,16 +48,6 @@ chrome.runtime.onMessage.addListener((request: unknown, _sender, sendResponse) =
   return true;
 });
 
-function broadcastPageContextChanged(): void {
+registerPageContextBroadcasts(chrome.tabs, () => {
   void chrome.runtime.sendMessage({ type: "PAGE_CONTEXT_CHANGED" });
-}
-
-chrome.tabs.onActivated.addListener(() => {
-  broadcastPageContextChanged();
-});
-
-chrome.tabs.onUpdated.addListener((_tabId, changeInfo, tab) => {
-  if (changeInfo.status === "loading" && tab.active) {
-    broadcastPageContextChanged();
-  }
 });

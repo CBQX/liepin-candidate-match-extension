@@ -18,6 +18,7 @@ const errorMessages: Record<AppErrorCode, string> = {
   EXTRACTION_FAILED: "候选人信息提取失败。",
   MISSING_API_KEY: "请先配置 DeepSeek API Key。",
   INVALID_API_KEY: "DeepSeek API Key 无效，请检查后重试。",
+  INVALID_PROVIDER_SETTINGS: "模型供应商或模型配置已失效，请重新配置。",
   RATE_LIMITED: "DeepSeek 请求过于频繁，请稍后重试。",
   INSUFFICIENT_BALANCE: "DeepSeek 账户余额不足，请充值后重试。",
   MODEL_TIMEOUT: "DeepSeek 响应超时，请重试。",
@@ -178,7 +179,7 @@ export class DeepSeekProvider implements ModelProvider {
 
   private requireSupportedModel(settings: ProviderSettings): void {
     if (!this.models.some((model) => model === settings.model)) {
-      throw new ProviderError("UNKNOWN", "不支持的 DeepSeek 模型配置。");
+      throw new ProviderError("INVALID_PROVIDER_SETTINGS");
     }
   }
 

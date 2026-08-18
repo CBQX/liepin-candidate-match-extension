@@ -142,7 +142,7 @@ describe("DeepSeekProvider", () => {
     await expect(new DeepSeekProvider(fetcher).analyze(input, {
       ...settings,
       model: "deepseek-v3"
-    })).rejects.toMatchObject({ code: "UNKNOWN" });
+    })).rejects.toMatchObject({ code: "INVALID_PROVIDER_SETTINGS" });
 
     expect(fetcher).not.toHaveBeenCalled();
   });
@@ -191,6 +191,25 @@ describe("DeepSeekProvider", () => {
     const fetcher = vi.fn<Fetcher>()
       .mockResolvedValueOnce(completion("not json"))
       .mockResolvedValueOnce(completion(JSON.stringify({ recruiterConclusion: "不完整" })));
+
+    const error = await caught(new DeepSeekProvider(fetcher).analyze(input, settings));
+
+    expect(mapProviderError(error)).toMatchObject({ code: "INVALID_MODEL_OUTPUT" });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
+  it("retries and rejects dimension scores without evidence", async () => {
+    // Break caught: structurally present but evidence-free scores could bypass the provider repair path.
+    const evidenceFreeResult = {
+      ...modelResult,
+      dimensionScores: modelResult.dimensionScores.map((dimension) => ({
+        ...dimension,
+        evidence: []
+      }))
+    };
+    const fetcher = vi.fn<Fetcher>()
+      .mockResolvedValueOnce(completion(JSON.stringify(evidenceFreeResult)))
+      .mockResolvedValueOnce(completion(JSON.stringify(evidenceFreeResult)));
 
     const error = await caught(new DeepSeekProvider(fetcher).analyze(input, settings));
 

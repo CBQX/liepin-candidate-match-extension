@@ -114,6 +114,44 @@ describe("analyzeCandidate", () => {
 
     expect(analyze).not.toHaveBeenCalled();
   });
+
+  it("strips Liepin URLs, platform paths, and labeled profile identifiers at the background boundary", async () => {
+    // Break caught: recruiter edits or extractor fallback text could reintroduce platform URLs/IDs after the preview redaction pass.
+    const analyze = vi.fn<ModelProvider["analyze"]>().mockResolvedValue(modelResult);
+    const draftWithPlatformIdentifiers: CandidateDraft = {
+      ...candidateDraft,
+      basics: {
+        text: "姓名：张三，简历ID：123456，https://www.liepin.com/candidate/secret?resumeId=789",
+        status: "complete"
+      },
+      workExperience: {
+        text: "乙公司高级产品经理，负责猎聘招聘系统，业绩提升 30%；/resume/showresumedetail/?res_id=999",
+        status: "complete"
+      },
+      projects: {
+        text: "候选人ID: lp-888；搭建 ATS 项目",
+        status: "complete"
+      },
+      other: {
+        text: "Profile ID：profile_001 https://c.liepin.com/profile/private",
+        status: "complete"
+      }
+    };
+
+    await analyzeCandidate({ job, candidateDraft: draftWithPlatformIdentifiers }, {
+      provider: providerWithAnalyze(analyze),
+      settings,
+      redact: redactCandidateDraft
+    });
+
+    const providerDraft = analyze.mock.calls[0]?.[0].candidateDraft;
+    const serializedDraft = JSON.stringify(providerDraft);
+    expect(serializedDraft).not.toMatch(/liepin\.com|\/resume\/|123456|lp-888|profile_001/iu);
+    expect(serializedDraft).toContain("乙公司高级产品经理");
+    expect(serializedDraft).toContain("负责猎聘招聘系统");
+    expect(serializedDraft).toContain("业绩提升 30%");
+    expect(serializedDraft).toContain("搭建 ATS 项目");
+  });
 });
 
 describe("ANALYZE_CANDIDATE controller response", () => {
@@ -169,6 +207,65 @@ describe("ANALYZE_CANDIDATE controller response", () => {
     expect(response).not.toHaveProperty("data.overallScore");
   });
 
+  it("maps evidence-free provider output to INVALID_MODEL_OUTPUT without returning a partial result", async () => {
+    // Break caught: a future provider adapter could skip schema validation and pass an unsupported score without evidence.
+    const evidenceFreeResult = {
+      ...modelResult,
+      dimensionScores: modelResult.dimensionScores.map((dimension, index) => index === 0
+        ? { ...dimension, evidence: [] }
+        : dimension)
+    } as ModelMatchResult;
+    const provider = providerWithAnalyze(vi.fn().mockResolvedValue(evidenceFreeResult));
+    const controller = createBackgroundController({
+      getActiveTab: async () => undefined,
+      sendToTab: vi.fn(),
+      loadProviderSettings: async () => settings,
+      resolveProvider: () => provider
+    });
+
+    const response = await controller.handle({
+      type: "ANALYZE_CANDIDATE",
+      job,
+      candidateDraft
+    });
+
+    expect(response).toMatchObject({
+      ok: false,
+      error: { code: "INVALID_MODEL_OUTPUT" }
+    });
+    expect(response).not.toHaveProperty("data");
+  });
+
+  it("maps a qualitative conclusion missing candidate evidence to INVALID_MODEL_OUTPUT", async () => {
+    // Break caught: defensive validation must cover claims as well as numeric scores for future provider adapters.
+    const evidenceFreeResult = {
+      ...modelResult,
+      matches: [{
+        claim: "经验匹配",
+        jobEvidence: ["岗位要求 5 年以上经验"],
+        candidateEvidence: []
+      }]
+    } as ModelMatchResult;
+    const controller = createBackgroundController({
+      getActiveTab: async () => undefined,
+      sendToTab: vi.fn(),
+      loadProviderSettings: async () => settings,
+      resolveProvider: () => providerWithAnalyze(vi.fn().mockResolvedValue(evidenceFreeResult))
+    });
+
+    const response = await controller.handle({
+      type: "ANALYZE_CANDIDATE",
+      job,
+      candidateDraft
+    });
+
+    expect(response).toMatchObject({
+      ok: false,
+      error: { code: "INVALID_MODEL_OUTPUT" }
+    });
+    expect(response).not.toHaveProperty("data");
+  });
+
   it("returns MISSING_API_KEY without resolving or invoking a provider", async () => {
     // Break caught: provider selection or invocation could run before the controller verifies stored credentials.
     const resolveProvider = vi.fn();
@@ -186,6 +283,52 @@ describe("ANALYZE_CANDIDATE controller response", () => {
     });
 
     expect(response).toMatchObject({ ok: false, error: { code: "MISSING_API_KEY" } });
+    expect(resolveProvider).not.toHaveBeenCalled();
+  });
+
+  it("maps a retired provider setting to reconfiguration before analysis", async () => {
+    // Break caught: retrying analysis with an adapter id no longer registered can never succeed without user reconfiguration.
+    const controller = createBackgroundController({
+      getActiveTab: async () => undefined,
+      sendToTab: vi.fn(),
+      loadProviderSettings: async () => ({ ...settings, providerId: "retired-provider" }),
+      resolveProvider: () => undefined
+    });
+
+    const response = await controller.handle({
+      type: "ANALYZE_CANDIDATE",
+      job,
+      candidateDraft
+    });
+
+    expect(response).toMatchObject({
+      ok: false,
+      error: { code: "INVALID_PROVIDER_SETTINGS" }
+    });
+  });
+
+  it("maps provider-settings load failures to STORAGE_FAILED before analysis", async () => {
+    // Break caught: a failed credential read could be reported as an unknown model error and accidentally enter a provider retry loop.
+    const resolveProvider = vi.fn();
+    const controller = createBackgroundController({
+      getActiveTab: async () => undefined,
+      sendToTab: vi.fn(),
+      loadProviderSettings: async () => {
+        throw new Error("storage unavailable");
+      },
+      resolveProvider
+    });
+
+    const response = await controller.handle({
+      type: "ANALYZE_CANDIDATE",
+      job,
+      candidateDraft
+    });
+
+    expect(response).toMatchObject({
+      ok: false,
+      error: { code: "STORAGE_FAILED" }
+    });
     expect(resolveProvider).not.toHaveBeenCalled();
   });
 });

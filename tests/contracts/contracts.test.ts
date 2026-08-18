@@ -1,6 +1,25 @@
 import { describe, expect, it } from "vitest";
 import { jobSchema } from "../../src/shared/contracts/job";
-import { matchAnalysisSchema } from "../../src/shared/contracts/matching";
+import {
+  matchAnalysisSchema,
+  modelMatchResultSchema,
+  ruleEvaluationSchema
+} from "../../src/shared/contracts/matching";
+
+const evidenceBackedModelResult = {
+  dimensionScores: [{
+    dimensionId: "hard_requirements" as const,
+    score: 80,
+    evidence: ["岗位与候选人材料中的明确依据"]
+  }],
+  matches: [],
+  mismatches: [],
+  risks: [],
+  missingInformation: [],
+  verificationQuestions: [],
+  outreachAdvice: [],
+  recruiterConclusion: "建议推进"
+};
 
 describe("runtime contracts", () => {
   it("rejects a job with any blank required field", () => {
@@ -24,5 +43,51 @@ describe("runtime contracts", () => {
       matches: [], mismatches: [], risks: [], missingInformation: [],
       verificationQuestions: [], outreachAdvice: [], recruiterConclusion: "推进"
     }).success).toBe(false);
+  });
+
+  it("rejects a dimension score without supporting evidence", () => {
+    // Break caught: an evidence-free score could pass runtime validation and appear authoritative in the UI.
+    expect(modelMatchResultSchema.safeParse({
+      ...evidenceBackedModelResult,
+      dimensionScores: [{
+        ...evidenceBackedModelResult.dimensionScores[0],
+        evidence: []
+      }]
+    }).success).toBe(false);
+  });
+
+  it.each(["matches", "mismatches", "risks", "missingInformation"] as const)(
+    "rejects an evidence-free conclusion in %s",
+    (section) => {
+      // Break caught: a qualitative claim could omit either job-side or candidate-side proof promised by the protocol.
+      const conclusion = {
+        claim: "缺少依据的结论",
+        jobEvidence: ["岗位依据"],
+        candidateEvidence: []
+      };
+
+      expect(modelMatchResultSchema.safeParse({
+        ...evidenceBackedModelResult,
+        [section]: [conclusion]
+      }).success).toBe(false);
+      expect(modelMatchResultSchema.safeParse({
+        ...evidenceBackedModelResult,
+        [section]: [{ ...conclusion, jobEvidence: [], candidateEvidence: ["候选人依据"] }]
+      }).success).toBe(false);
+    }
+  );
+
+  it("requires evidence for met or not-met hard requirements while allowing unknown to stay empty", () => {
+    // Break caught: a deterministic hard-condition status could be accepted with no auditable rule evidence.
+    expect(ruleEvaluationSchema.safeParse({
+      criterionId: "c1",
+      status: "met",
+      evidence: []
+    }).success).toBe(false);
+    expect(ruleEvaluationSchema.safeParse({
+      criterionId: "c1",
+      status: "unknown",
+      evidence: []
+    }).success).toBe(true);
   });
 });

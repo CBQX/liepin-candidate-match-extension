@@ -62,7 +62,8 @@ function deferred<T>() {
 type Analyze = SidePanelDependencies["analyzeCandidate"];
 
 function createDependencies(analyzeCandidate: Analyze) {
-  return {
+  let pageContextListener: (() => void) | undefined;
+  const dependencies = {
     providerSettings: {
       load: vi.fn(async () => ({
         providerId: "deepseek",
@@ -81,8 +82,19 @@ function createDependencies(analyzeCandidate: Analyze) {
     validateProvider: vi.fn(async () => ({ ok: true as const, data: { valid: true as const } })),
     extractCurrentCandidate: vi.fn(async () => ({ ok: true as const, data: candidateDraft })),
     analyzeCandidate: vi.fn<Analyze>(analyzeCandidate),
-    subscribeToPageContextChanges: vi.fn(() => () => undefined)
+    subscribeToPageContextChanges: vi.fn((listener: () => void) => {
+      pageContextListener = listener;
+      return () => {
+        pageContextListener = undefined;
+      };
+    })
   } satisfies SidePanelDependencies;
+  return {
+    ...dependencies,
+    emitPageContextChanged() {
+      pageContextListener?.();
+    }
+  };
 }
 
 describe("analysis workflow", () => {
@@ -151,13 +163,17 @@ describe("analysis workflow", () => {
     expect(screen.getAllByRole("button", { name: "重试分析" })).toHaveLength(1);
   });
 
-  it.each(["MISSING_API_KEY", "INVALID_API_KEY"])(
+  it.each([
+    ["MISSING_API_KEY", "请先配置 DeepSeek API Key。"],
+    ["INVALID_API_KEY", "DeepSeek API Key 无效，请检查后重试。"],
+    ["INVALID_PROVIDER_SETTINGS", "模型供应商或模型配置已失效，请重新配置。"]
+  ] as const)(
     "offers model reconfiguration for %s without retrying automatically",
-    async (code) => {
+    async (code, message) => {
       // Break caught: credential failures could loop the same bad request instead of returning the recruiter to model setup.
       const deps = createDependencies(async () => ({
         ok: false,
-        error: { code: code as AppError["code"], message: "请重新配置 DeepSeek API Key。" }
+        error: { code: code as AppError["code"], message }
       }));
       const user = userEvent.setup();
       render(<App deps={deps} />);
@@ -170,4 +186,56 @@ describe("analysis workflow", () => {
       await waitFor(() => expect(deps.analyzeCandidate).toHaveBeenCalledTimes(1));
     }
   );
+
+  it("discards a deferred analysis result after a page-context change", async () => {
+    // Break caught: a late model response could repopulate a candidate/result after URL navigation cleared the session.
+    const pending = deferred<Awaited<ReturnType<Analyze>>>();
+    const deps = createDependencies(() => pending.promise);
+    const user = userEvent.setup();
+    render(<App deps={deps} />);
+
+    await user.click(await screen.findByRole("button", { name: "匹配分析" }));
+    await user.click(await screen.findByRole("button", { name: "确认并分析" }));
+    expect(await screen.findByText("正在生成匹配分析…")).toBeTruthy();
+
+    act(() => deps.emitPageContextChanged());
+    expect(await screen.findByRole("button", { name: "匹配分析" })).toBeTruthy();
+
+    await act(async () => {
+      pending.resolve({ ok: true, data: result });
+      await pending.promise;
+    });
+
+    expect(screen.queryByText("猎头结论")).toBeNull();
+    expect(screen.getByRole("button", { name: "匹配分析" })).toBeTruthy();
+  });
+
+  it("cancels a running analysis, returns to the edited preview, and ignores the late result", async () => {
+    // Break caught: cancellation could discard recruiter edits or allow a late provider response to overwrite the restored preview.
+    const pending = deferred<Awaited<ReturnType<Analyze>>>();
+    const deps = createDependencies(() => pending.promise);
+    const user = userEvent.setup();
+    render(<App deps={deps} />);
+
+    await user.click(await screen.findByRole("button", { name: "匹配分析" }));
+    fireEvent.change(await screen.findByLabelText("技能"), {
+      target: { value: "取消前已编辑：SaaS 与 AI" }
+    });
+    await user.click(screen.getByRole("button", { name: "确认并分析" }));
+    expect(await screen.findByText("正在生成匹配分析…")).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "取消分析" }));
+    expect(await screen.findByRole("button", { name: "确认并分析" })).toBeTruthy();
+    expect((screen.getByLabelText("技能") as HTMLTextAreaElement).value)
+      .toBe("取消前已编辑：SaaS 与 AI");
+
+    await act(async () => {
+      pending.resolve({ ok: true, data: result });
+      await pending.promise;
+    });
+
+    expect(screen.queryByText("猎头结论")).toBeNull();
+    expect((screen.getByLabelText("技能") as HTMLTextAreaElement).value)
+      .toBe("取消前已编辑：SaaS 与 AI");
+  });
 });

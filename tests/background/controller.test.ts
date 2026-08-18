@@ -121,4 +121,41 @@ describe("background controller", () => {
     expect(result).toMatchObject({ ok: false, error: { code: "MISSING_API_KEY" } });
     expect(resolveProvider).not.toHaveBeenCalled();
   });
+
+  it("maps a retired stored provider id to reconfiguration instead of an endless retry", async () => {
+    // Break caught: stale provider settings could be labeled UNKNOWN even though retrying cannot change provider resolution.
+    const controller = createBackgroundController(dependencies({
+      loadProviderSettings: async () => ({
+        ...settings,
+        providerId: "retired-provider"
+      }),
+      resolveProvider: () => undefined
+    }));
+
+    const result = await controller.handle({ type: "VALIDATE_PROVIDER" });
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: "INVALID_PROVIDER_SETTINGS" }
+    });
+  });
+
+  it("maps provider-settings load failures to STORAGE_FAILED during validation", async () => {
+    // Break caught: a repository read failure could be mislabeled as a provider/network error and send the user down the wrong recovery path.
+    const resolveProvider = vi.fn();
+    const controller = createBackgroundController(dependencies({
+      loadProviderSettings: async () => {
+        throw new Error("storage unavailable");
+      },
+      resolveProvider
+    }));
+
+    const result = await controller.handle({ type: "VALIDATE_PROVIDER" });
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: "STORAGE_FAILED" }
+    });
+    expect(resolveProvider).not.toHaveBeenCalled();
+  });
 });

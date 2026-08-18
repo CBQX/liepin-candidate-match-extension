@@ -6,7 +6,11 @@ import type { ModelProvider } from "../providers/model-provider";
 import type { ProviderSettings } from "../repositories/chrome-provider-settings";
 import type { CandidateDraft } from "../shared/contracts/candidate";
 import type { Job } from "../shared/contracts/job";
-import type { MatchAnalysis } from "../shared/contracts/matching";
+import {
+  matchAnalysisSchema,
+  modelMatchResultSchema,
+  type MatchAnalysis
+} from "../shared/contracts/matching";
 import type { AppErrorCode } from "../shared/errors";
 
 export interface AnalyzeCandidateRequest {
@@ -44,7 +48,12 @@ export async function analyzeCandidate(
     deps.settings
   );
   try {
-    return composeAnalysis(modelResult, ruleEvaluations, cleanCandidate.extractionConfidence);
+    const validatedModelResult = modelMatchResultSchema.parse(modelResult);
+    return matchAnalysisSchema.parse(composeAnalysis(
+      validatedModelResult,
+      ruleEvaluations,
+      cleanCandidate.extractionConfidence
+    ));
   } catch {
     throw new AnalysisPipelineError("INVALID_MODEL_OUTPUT");
   }

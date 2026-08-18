@@ -271,6 +271,10 @@ select:disabled {
   text-align: center;
 }
 
+.analysis-progress .secondary-button {
+  width: 100%;
+}
+
 .progress-spinner {
   display: block;
   width: 42px;

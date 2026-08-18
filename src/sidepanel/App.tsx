@@ -228,8 +228,15 @@ export function App({ deps }: AppProps) {
     }
   }
 
-  const credentialError = analysisError?.code === "MISSING_API_KEY"
-    || analysisError?.code === "INVALID_API_KEY";
+  function cancelCurrentAnalysis() {
+    extractionGeneration.current += 1;
+    setAnalysisError(undefined);
+    setAnalyzing(false);
+  }
+
+  const reconfigurationError = analysisError?.code === "MISSING_API_KEY"
+    || analysisError?.code === "INVALID_API_KEY"
+    || analysisError?.code === "INVALID_PROVIDER_SETTINGS";
 
   return (
     <main className="app-shell">
@@ -264,19 +271,19 @@ export function App({ deps }: AppProps) {
         analysisSession.result ? (
           <AnalysisResult analysis={analysisSession.result} job={activeJob} />
         ) : analyzing ? (
-          <AnalysisProgress />
+          <AnalysisProgress onCancel={cancelCurrentAnalysis} />
         ) : analysisError ? (
           <section className="panel-card error-card" aria-labelledby="analysis-failure-title" role="alert">
             <p className="eyebrow">分析未完成</p>
             <h2 id="analysis-failure-title">
-              {credentialError ? "需要重新配置模型" : "本次匹配分析未完成"}
+              {reconfigurationError ? "需要重新配置模型" : "本次匹配分析未完成"}
             </h2>
             <p className="muted">{analysisError.message}</p>
             <button
               className="primary-button"
               type="button"
               onClick={() => {
-                if (credentialError) {
+                if (reconfigurationError) {
                   setAnalysisError(undefined);
                   setSetupState("needs_model");
                 } else {
@@ -284,7 +291,7 @@ export function App({ deps }: AppProps) {
                 }
               }}
             >
-              {credentialError ? "重新配置模型" : "重试分析"}
+              {reconfigurationError ? "重新配置模型" : "重试分析"}
             </button>
           </section>
         ) : analysisSession.draft ? (

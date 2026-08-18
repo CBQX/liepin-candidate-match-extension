@@ -29,6 +29,14 @@ export const ruleEvaluationSchema = z.object({
   criterionId: requiredText,
   status: z.enum(requirementStatuses),
   evidence: z.array(requiredText)
+}).superRefine((evaluation, context) => {
+  if (evaluation.status !== "unknown" && evaluation.evidence.length === 0) {
+    context.addIssue({
+      code: "custom",
+      path: ["evidence"],
+      message: "A deterministic hard-requirement status requires evidence"
+    });
+  }
 });
 
 export type RuleEvaluation = z.infer<typeof ruleEvaluationSchema>;
@@ -36,15 +44,15 @@ export type RuleEvaluation = z.infer<typeof ruleEvaluationSchema>;
 export const dimensionScoreSchema = z.object({
   dimensionId: z.enum(dimensionIds),
   score: z.number().int().min(0).max(100),
-  evidence: z.array(requiredText)
+  evidence: z.array(requiredText).min(1)
 });
 
 export type DimensionScore = z.infer<typeof dimensionScoreSchema>;
 
 export const qualitativeEvidenceSchema = z.object({
   claim: requiredText,
-  jobEvidence: z.array(requiredText),
-  candidateEvidence: z.array(requiredText)
+  jobEvidence: z.array(requiredText).min(1),
+  candidateEvidence: z.array(requiredText).min(1)
 });
 
 export type QualitativeEvidence = z.infer<typeof qualitativeEvidenceSchema>;

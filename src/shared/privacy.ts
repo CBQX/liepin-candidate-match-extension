@@ -12,6 +12,9 @@ const sectionKeys = [
 const emailPattern = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/giu;
 const mainlandMobilePattern = /(?<!\d)(?:\+?86[\s-]*)?1[3-9]\d(?:[\s-]*\d){8}(?!\d)/gu;
 const labeledContactPattern = /((?:微信(?:号)?|wechat|QQ(?:号)?|联系方式|联系电话|手机(?:号码)?|邮箱)\s*[:：]?\s*)(?!\[已移除\])(?:[A-Z0-9._+@-]{2,})/giu;
+const liepinUrlPattern = /https?:\/\/(?:[A-Z0-9-]+\.)*liepin\.com(?::\d+)?(?:[/?#][^\s<>{}\[\]"'，。；;]*)?/giu;
+const liepinPathPattern = /(^|[\s，。；;（(])\/(?:candidate|resume|profile|cv)(?:[/?#][^\s<>{}\[\]"'，。；;]*)?/giu;
+const labeledPlatformIdPattern = /((?:(?:简历|候选人|人选|档案|猎聘|profile|resume|candidate)\s*(?:ID|编号|标识))\s*[:：#]?\s*)(?!\[已移除\])[A-Z0-9_-]{2,}/giu;
 
 interface ConfirmedIdentity {
   start: number;
@@ -57,7 +60,10 @@ function redactContacts(text: string): string {
   return text
     .replace(emailPattern, "[已移除]")
     .replace(mainlandMobilePattern, "[已移除]")
-    .replace(labeledContactPattern, "$1[已移除]");
+    .replace(labeledContactPattern, "$1[已移除]")
+    .replace(liepinUrlPattern, "[已移除]")
+    .replace(liepinPathPattern, "$1[已移除]")
+    .replace(labeledPlatformIdPattern, "$1[已移除]");
 }
 
 export function redactCandidateDraft(draft: CandidateDraft): CandidateDraft {
