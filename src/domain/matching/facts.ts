@@ -10,6 +10,12 @@ export const EDUCATION_LEVELS = [
 
 export type EducationLevel = typeof EDUCATION_LEVELS[number];
 
+export interface ObjectiveSourceEvidence {
+  yearsExperience: string[];
+  certificates: Map<string, string[]>;
+  locations: string[];
+}
+
 export interface ObjectiveFacts {
   tokens: Set<string>;
   tokenEvidence?: Map<string, string[]>;
@@ -17,6 +23,7 @@ export interface ObjectiveFacts {
   yearsExperience?: number;
   yearsExperienceEvidence?: string;
   locations?: Set<string>;
+  sourceEvidence?: ObjectiveSourceEvidence;
 }
 
 export const EDUCATION_LABELS: Record<EducationLevel, string> = {
@@ -80,6 +87,8 @@ const explicitCandidateReference = /本人|候选人/u;
 const candidateClauses = (text: string): string[] =>
   text.split(/[。；;\n]/u).map((clause) => clause.trim()).filter(Boolean);
 
+const uniqueEvidence = (evidence: readonly string[]): string[] => [...new Set(evidence)];
+
 type ExperienceClauseClassification = "clear" | "qualified";
 
 const classifyExperienceClause = (clause: string): ExperienceClauseClassification => {
@@ -132,6 +141,28 @@ const findYearsExperience = (
   });
 
   return values.sort((left, right) => right.value - left.value)[0];
+};
+
+const findYearsExperienceSourceEvidence = (draft: CandidateDraft): string[] => {
+  const evidence: string[] = [];
+
+  for (const section of ["basics", "workExperience"] as const) {
+    for (const clause of candidateClauses(draft[section].text)) {
+      const compact = clause.replace(/\s+/gu, "");
+      if (!/\d+(?:\.\d+)?年/u.test(compact) || !/经验/u.test(compact)) continue;
+
+      const hasNonCandidateContext = nonCandidateOwnershipContext.test(clause);
+      const candidateIsExplicit = explicitCandidateReference.test(clause)
+        || /^(?:工作|从业)经验\s*[:：]/u.test(clause)
+        || /^(?:明确|累计|拥有|具备|已有|不到|不足|不满|最多|至多|不超过|少于|低于|未满|\d)/u
+          .test(clause);
+      if (hasNonCandidateContext && !candidateIsExplicit) continue;
+
+      evidence.push(`${sectionLabels[section]}：${clause}`);
+    }
+  }
+
+  return uniqueEvidence(evidence);
 };
 
 type CredentialClauseClassification = "positive" | "qualified" | "unsupported";
@@ -201,33 +232,68 @@ const candidateOwnedTokenEvidence = (
   return [...new Set(evidence)];
 };
 
-const findLocations = (text: string): Set<string> => {
-  const locations = new Set<string>();
-  const pattern = /(?:现居地|所在地|当前城市|所在城市|工作地点|常驻地|Location)\s*[:：]\s*([^\s,，;；。|/]{2,20})/giu;
+const candidateMentionedTokenEvidence = (
+  draft: CandidateDraft,
+  pattern: RegExp
+): string[] => {
+  const evidence: string[] = [];
+  const sections = Object.keys(sectionLabels) as CandidateTextSection[];
+  const tokenPattern = new RegExp(pattern.source, pattern.flags.replace(/[gy]/gu, ""));
 
-  for (const match of text.matchAll(pattern)) {
-    const location = match[1]?.trim();
-    if (location) locations.add(location);
+  for (const section of sections) {
+    for (const clause of candidateClauses(draft[section].text)) {
+      if (!tokenPattern.test(clause)) continue;
+      const hasNonCandidateContext = nonCandidateOwnershipContext.test(clause);
+      if (hasNonCandidateContext && !explicitCandidateReference.test(clause)) continue;
+      evidence.push(`${sectionLabels[section]}：${clause}`);
+    }
   }
 
-  return locations;
+  return uniqueEvidence(evidence);
 };
 
-export function extractObjectiveFacts(draft: CandidateDraft): ObjectiveFacts & { locations: Set<string> } {
+const findLocationFacts = (draft: CandidateDraft): {
+  locations: Set<string>;
+  evidence: string[];
+} => {
+  const locations = new Set<string>();
+  const evidence: string[] = [];
+  const sections = Object.keys(sectionLabels) as CandidateTextSection[];
+
+  for (const section of sections) {
+    const pattern = /(?:现居地|所在地|当前城市|所在城市|工作地点|常驻地|Location)\s*[:：]\s*([^\s,，;；。|/]{2,20})/giu;
+    for (const match of draft[section].text.matchAll(pattern)) {
+      const location = match[1]?.trim();
+      const source = match[0]?.trim();
+      if (!location || !source) continue;
+      locations.add(location);
+      evidence.push(`${sectionLabels[section]}：${source}`);
+    }
+  }
+
+  return { locations, evidence: uniqueEvidence(evidence) };
+};
+
+export function extractObjectiveFacts(draft: CandidateDraft): ObjectiveFacts & {
+  locations: Set<string>;
+  sourceEvidence: ObjectiveSourceEvidence;
+} {
   const tokens = new Set<string>();
   const tokenEvidence = new Map<string, string[]>();
+  const certificateSourceEvidence = new Map<string, string[]>();
   OBJECTIVE_TOKEN_ALIASES.forEach(([token, , pattern]) => {
     const evidence = candidateOwnedTokenEvidence(draft, pattern);
     if (evidence.length > 0) {
       tokens.add(token);
       tokenEvidence.set(token, evidence);
     }
+    const sourceEvidence = candidateMentionedTokenEvidence(draft, pattern);
+    if (sourceEvidence.length > 0) {
+      certificateSourceEvidence.set(token, sourceEvidence);
+    }
   });
   const years = findYearsExperience(draft);
-
-  const text = Object.keys(sectionLabels)
-    .map((section) => draft[section as CandidateTextSection].text)
-    .join("\n");
+  const locationFacts = findLocationFacts(draft);
 
   return {
     tokens,
@@ -235,6 +301,11 @@ export function extractObjectiveFacts(draft: CandidateDraft): ObjectiveFacts & {
     educationLevel: findEducationLevel(draft.education.text),
     yearsExperience: years?.value,
     yearsExperienceEvidence: years?.evidence,
-    locations: findLocations(text)
+    locations: locationFacts.locations,
+    sourceEvidence: {
+      yearsExperience: findYearsExperienceSourceEvidence(draft),
+      certificates: certificateSourceEvidence,
+      locations: locationFacts.evidence
+    }
   };
 }

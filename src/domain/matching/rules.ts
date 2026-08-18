@@ -13,6 +13,10 @@ const evaluation = (
   evidence: string[] = []
 ): RuleEvaluation => ({ criterionId, status, evidence });
 
+const mergeEvidence = (...groups: readonly (readonly string[])[]): string[] => [
+  ...new Set(groups.flat())
+];
+
 const REQUIREMENT_PREFIX = String.raw`(?:(?:必须|硬性(?:要求)?|要求|需|需要)\s*)?`;
 
 const isSupportedEducationCriterion = (text: string): boolean => new RegExp(
@@ -118,19 +122,30 @@ const evaluateCriterion = (criterion: JobCriterion, facts: ObjectiveFacts): Rule
   if (years !== undefined) {
     // Stage C safety breaker: natural-language tenure cannot be proven safely enough
     // for a deterministic hard gate. Keep extracted facts for provider/recruiter evidence.
-    return evaluation(criterion.id, "unknown");
+    return evaluation(criterion.id, "unknown", mergeEvidence(
+      facts.sourceEvidence?.yearsExperience ?? [],
+      facts.yearsExperienceEvidence ? [facts.yearsExperienceEvidence] : []
+    ));
   }
 
   const location = parseSupportedLocation(criterion.text);
   if (location) {
-    return evaluation(criterion.id, "unknown");
+    return evaluation(
+      criterion.id,
+      "unknown",
+      facts.sourceEvidence?.locations ?? []
+    );
   }
 
   const token = requiredToken(criterion.text);
   if (token && isSupportedTokenCriterion(criterion.text, token[2])) {
     // Stage C safety breaker: a credential mention is not a maintained, verified
     // credential record, so it can inform analysis but never a deterministic hard gate.
-    return evaluation(criterion.id, "unknown");
+    const [normalized] = token;
+    return evaluation(criterion.id, "unknown", mergeEvidence(
+      facts.sourceEvidence?.certificates.get(normalized) ?? [],
+      facts.tokenEvidence?.get(normalized) ?? []
+    ));
   }
 
   return evaluation(criterion.id, "unknown");

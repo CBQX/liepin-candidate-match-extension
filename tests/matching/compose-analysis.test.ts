@@ -102,6 +102,34 @@ describe("composeAnalysis", () => {
     expect(severalUnknown.confidence).toBe("low");
   });
 
+  it("never lets candidate-source evidence on unknown breaker rules change score or recommendation", () => {
+    const withoutEvidence = composeAnalysis(modelResultWithAllDimensionsAt(90), [
+      { criterionId: "location", status: "unknown", evidence: [] },
+      { criterionId: "years", status: "unknown", evidence: [] },
+      { criterionId: "certificate", status: "unknown", evidence: [] }
+    ], "high");
+    const withContradictoryEvidence = composeAnalysis(modelResultWithAllDimensionsAt(90), [
+      { criterionId: "location", status: "unknown", evidence: ["基本信息：现居地：北京"] },
+      { criterionId: "years", status: "unknown", evidence: ["工作经历：不足 5 年工作经验"] },
+      { criterionId: "certificate", status: "unknown", evidence: ["技能：未通过 PMP"] }
+    ], "high");
+
+    expect({
+      overallScore: withContradictoryEvidence.overallScore,
+      recommendation: withContradictoryEvidence.recommendation,
+      confidence: withContradictoryEvidence.confidence
+    }).toEqual({
+      overallScore: withoutEvidence.overallScore,
+      recommendation: withoutEvidence.recommendation,
+      confidence: withoutEvidence.confidence
+    });
+    expect(withContradictoryEvidence).toMatchObject({
+      overallScore: 90,
+      recommendation: "strong_recommend",
+      confidence: "low"
+    });
+  });
+
   it("sets low confidence when a core candidate section is missing despite a high extraction flag", () => {
     // Break caught: trusting extractionConfidence alone can label an analysis high-confidence with no work history.
     const analysis = composeAnalysis(modelResultWithAllDimensionsAt(80), [], {

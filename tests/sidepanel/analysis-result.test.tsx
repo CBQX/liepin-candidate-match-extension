@@ -1,8 +1,12 @@
 import { cleanup, render, screen, within } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { analyzeCandidate } from "../../src/background/analyze-candidate";
 import { AnalysisResult } from "../../src/sidepanel/components/AnalysisResult";
+import { detectCandidateRedactionContext, redactCandidateDraft } from "../../src/shared/privacy";
+import type { ModelProvider } from "../../src/providers/model-provider";
+import type { CandidateDraft } from "../../src/shared/contracts/candidate";
 import type { Job } from "../../src/shared/contracts/job";
-import type { MatchAnalysis } from "../../src/shared/contracts/matching";
+import type { MatchAnalysis, ModelMatchResult } from "../../src/shared/contracts/matching";
 
 afterEach(() => cleanup());
 
@@ -120,5 +124,97 @@ describe("AnalysisResult", () => {
     expect(screen.getByText("请核实上海到岗意愿")).toBeTruthy();
     expect(screen.getByText("从 SaaS 产品经历切入")).toBeTruthy();
     expect(screen.getByText("建议推进，电话中优先核实地点意愿与团队规模。")).toBeTruthy();
+  });
+
+  it("preserves sanitized local evidence when the provider omits every breaker clause", async () => {
+    const breakerJob: Job = {
+      ...job,
+      jd: "必须有 5 年以上经验",
+      customRequirements: "必须工作地点：上海\n必须持有 PMP"
+    };
+    const sensitiveDraft: CandidateDraft = {
+      basics: {
+        text: "姓名：张三，手机 13812345678，现居地：北京",
+        status: "complete"
+      },
+      workExperience: {
+        text: "张三拥有 8 年工作经验，简历ID：123456",
+        status: "complete"
+      },
+      projects: { text: "企业软件项目", status: "complete" },
+      education: { text: "本科学历", status: "complete" },
+      skills: {
+        text: "张三已持有 PMP，https://www.liepin.com/candidate/secret",
+        status: "complete"
+      },
+      other: { text: "", status: "missing" },
+      extractionConfidence: "high"
+    };
+    const providerOmission: ModelMatchResult = {
+      dimensionScores: analysis.dimensionScores.map(({ dimensionId }) => ({
+        dimensionId,
+        score: 80,
+        evidence: ["模型仅返回维度级说明"]
+      })),
+      matches: [],
+      mismatches: [],
+      risks: [],
+      missingInformation: [],
+      verificationQuestions: [],
+      outreachAdvice: [],
+      recruiterConclusion: "请由猎头结合候选人来源证据核实"
+    };
+    const providerAnalyze = vi.fn<ModelProvider["analyze"]>().mockResolvedValue(providerOmission);
+    const provider: ModelProvider = {
+      id: "deepseek",
+      models: [],
+      validateCredentials: async () => undefined,
+      analyze: providerAnalyze
+    };
+
+    const composed = await analyzeCandidate({
+      job: breakerJob,
+      candidateDraft: sensitiveDraft,
+      redactionContext: detectCandidateRedactionContext(sensitiveDraft.basics.text)
+    }, {
+      provider,
+      settings: { providerId: "deepseek", model: "deepseek-v4-pro", apiKey: "sk-test" },
+      redact: redactCandidateDraft
+    });
+
+    const expectedHardRequirements = [
+      {
+        criterionId: "custom-1",
+        status: "unknown" as const,
+        evidence: ["基本信息：现居地：北京"]
+      },
+      {
+        criterionId: "custom-2",
+        status: "unknown" as const,
+        evidence: ["技能：候选人已持有 PMP，[已移除]"]
+      },
+      {
+        criterionId: "jd-1",
+        status: "unknown" as const,
+        evidence: ["工作经历：候选人拥有 8 年工作经验，简历ID：[已移除]"]
+      }
+    ];
+    expect(providerOmission.matches).toEqual([]);
+    expect(providerOmission.missingInformation).toEqual([]);
+    expect(providerAnalyze.mock.calls[0]?.[0].ruleEvaluations).toEqual(expectedHardRequirements);
+    expect(composed.hardRequirements).toEqual(expectedHardRequirements);
+    expect(JSON.stringify(composed)).not.toMatch(/张三|13812345678|123456|liepin\.com|candidate\/secret/u);
+
+    render(<AnalysisResult analysis={composed} job={breakerJob} />);
+    for (const [criterionText, sourceEvidence] of [
+      ["必须工作地点：上海", "基本信息：现居地：北京"],
+      ["必须持有 PMP", "技能：候选人已持有 PMP，[已移除]"],
+      ["必须有 5 年以上经验", "工作经历：候选人拥有 8 年工作经验，简历ID：[已移除]"]
+    ] as const) {
+      const requirement = screen.getByText(criterionText).closest("li")!;
+      expect(within(requirement).getByText("未知")).toBeTruthy();
+      expect(within(requirement).getByText("候选人来源证据（需猎头核实）")).toBeTruthy();
+      expect(within(requirement).getByText(sourceEvidence)).toBeTruthy();
+    }
   });
 });

@@ -138,7 +138,12 @@ export function AnalysisResult({ analysis, job }: AnalysisResultProps) {
                   </span>
                 </div>
                 {requirement.evidence.length > 0 ? (
-                  <ul>{requirement.evidence.map((evidence) => <li key={evidence}>{evidence}</li>)}</ul>
+                  <>
+                    {requirement.status === "unknown" ? (
+                      <p className="muted"><strong>候选人来源证据（需猎头核实）</strong></p>
+                    ) : null}
+                    <ul>{requirement.evidence.map((evidence) => <li key={evidence}>{evidence}</li>)}</ul>
+                  </>
                 ) : <p className="muted result-empty">暂无可核验证据，建议人工确认。</p>}
               </li>
             ))}

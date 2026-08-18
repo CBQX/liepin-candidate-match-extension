@@ -23,7 +23,11 @@
 > certificates. In Stage C, `years_experience`, `location`, and `certificate` must
 > always evaluate to `unknown`, even for apparently exact positive or negative text.
 > Candidate/JD text and extracted facts remain available to the provider and recruiter
-> as evidence. They cannot satisfy, fail, eliminate, or downgrade deterministically;
+> as evidence. Sanitized candidate-source evidence is also preserved locally in the
+> final rule result and labeled for recruiter verification even when the provider omits
+> it; evidence presence or content cannot change status, score, confidence,
+> recommendation, elimination, or hard-failure downgrade. These dimensions cannot
+> satisfy, fail, eliminate, or downgrade deterministically.
 > natural-language bounds, negation, plans, credential validity, and location versus
 > availability are too ambiguous without maintained structured records. Safely
 > structured criteria such as explicit education retain their existing behavior.
@@ -39,7 +43,7 @@
 - Candidate drafts and analysis results never enter persistent storage, sync storage, IndexedDB, logs, telemetry, or analytics.
 - Remove direct contact identifiers and replace the candidate name before model submission; never send the Liepin URL or candidate ID.
 - Unknown candidate information is not a mismatch. Every match or mismatch must carry job-side and candidate-side evidence.
-- Stage C deterministic hard-rule evaluation always returns `unknown` for location, experience years, and certificates; preserve their source evidence for the model and recruiter, while leaving safely structured criteria such as explicit education unchanged.
+- Stage C deterministic hard-rule evaluation always returns `unknown` for location, experience years, and certificates; preserve sanitized source evidence in the final local rule result independently of provider output, label it for recruiter verification, and leave safely structured criteria such as explicit education unchanged.
 - Protected or irrelevant traits such as sex, ethnicity, marital status, or fertility must never affect scoring.
 - Request only `sidePanel`, `storage`, Liepin host access, and DeepSeek host access in the MVP manifest.
 - Use Test-Driven Development for every domain, adapter, and UI behavior; each task ends with a focused test run and commit.
@@ -587,9 +591,9 @@ export const DIMENSION_WEIGHTS = {
 
 `parseJobCriteria` splits non-empty lines and Chinese sentence delimiters, processes custom requirements before JD, classifies `必须|硬性|不接受|不可` as hard and `优先|加分|最好|优选` as preferred, and otherwise uses standard priority.
 
-`extractObjectiveFacts` recognizes only explicit evidence: education levels, text such as `N 年经验`, visible location labels, language certificates, and professional certificate tokens. It must not infer age, sex, salary, motivation, or availability. Experience, location, and certificate facts remain support data for provider/recruiter evidence, not deterministic hard gates.
+`extractObjectiveFacts` recognizes only explicit evidence: education levels, text such as `N 年经验`, visible location labels, language certificates, and professional certificate tokens. It must not infer age, sex, salary, motivation, or availability. From the already-redacted candidate draft it also records typed source-evidence channels for experience clauses, credential mentions, and labeled locations; these remain support data for provider/recruiter evidence, not deterministic hard gates, and must contain no identity, contact, URL, or platform identifier.
 
-`evaluateObjectiveRules` may evaluate only safely structured recognized patterns such as explicit education. It must return `unknown` for every `years_experience`, `location`, and `certificate` hard criterion regardless of extracted fact or wording; unsupported criteria also return `unknown`. Tests must cover exact positive and negative/qualified probes and prove these three families never produce `met` or `not_met`, while education behavior remains unchanged. `composeAnalysis` validates every dimension exists once, computes the rounded weighted score, applies the four score bands, downgrades one level for one supported deterministic hard failure, sets `not_recommend` for two or more such failures, and derives confidence from unknown hard criteria and extraction confidence.
+`evaluateObjectiveRules` may evaluate only safely structured recognized patterns such as explicit education. It must return `unknown` for every `years_experience`, `location`, and `certificate` hard criterion regardless of extracted fact or wording; unsupported criteria also return `unknown`. For the three breaker families it attaches any relevant sanitized candidate-source evidence without changing status. Tests must cover exact positive and negative/qualified probes, provider omission, final UI preservation, and prove these three families never produce `met` or `not_met`, while education behavior remains unchanged. `composeAnalysis` validates every dimension exists once, computes the rounded weighted score, applies the four score bands, downgrades one level for one supported deterministic hard failure, sets `not_recommend` for two or more such failures, and derives confidence from unknown hard criteria and extraction confidence; evidence presence must not affect any of those calculations.
 
 - [ ] **Step 5: Run all matching tests**
 

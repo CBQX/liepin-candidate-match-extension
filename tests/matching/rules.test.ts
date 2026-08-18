@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { evaluateObjectiveRules } from "../../src/domain/matching/rules";
-import { extractObjectiveFacts } from "../../src/domain/matching/facts";
+import { extractObjectiveFacts, type ObjectiveFacts } from "../../src/domain/matching/facts";
 import type { CandidateDraft } from "../../src/shared/contracts/candidate";
 import type { JobCriterion } from "../../src/shared/contracts/matching";
 
@@ -67,8 +67,16 @@ describe("evaluateObjectiveRules", () => {
       }
     );
 
-    expect(met).toEqual({ criterionId: "c1", status: "unknown", evidence: [] });
-    expect(belowThreshold).toEqual({ criterionId: "c1", status: "unknown", evidence: [] });
+    expect(met).toEqual({
+      criterionId: "c1",
+      status: "unknown",
+      evidence: ["工作经历：工作经验：8 年"]
+    });
+    expect(belowThreshold).toEqual({
+      criterionId: "c1",
+      status: "unknown",
+      evidence: ["工作经历：工作经验：3 年"]
+    });
     expect(unknown?.status).toBe("unknown");
   });
 
@@ -110,7 +118,11 @@ describe("evaluateObjectiveRules", () => {
       }
     );
 
-    expect(result).toEqual({ criterionId: "c1", status: "unknown", evidence: [] });
+    expect(result).toEqual({
+      criterionId: "c1",
+      status: "unknown",
+      evidence: ["技能：持有 PMP 证书"]
+    });
   });
 
   it("does not treat customer years or a training-project certificate mention as candidate possession", () => {
@@ -143,8 +155,8 @@ describe("evaluateObjectiveRules", () => {
       criterion("必须有 5 年以上经验"),
       { ...criterion("必须持有 PMP"), id: "c2" }
     ], facts)).toEqual([
-      { criterionId: "c1", status: "unknown", evidence: [] },
-      { criterionId: "c2", status: "unknown", evidence: [] }
+      { criterionId: "c1", status: "unknown", evidence: ["工作经历：工作经验：8 年"] },
+      { criterionId: "c2", status: "unknown", evidence: ["技能：证书：PMP"] }
     ]);
   });
 
@@ -174,7 +186,12 @@ describe("evaluateObjectiveRules", () => {
 
     expect(facts.yearsExperience).toBeUndefined();
     expect(facts.yearsExperienceEvidence).toBeUndefined();
-    expect(result).toEqual({ criterionId: "c1", status: "unknown", evidence: [] });
+    expect(facts.sourceEvidence?.yearsExperience).toEqual([`工作经历：${source}`]);
+    expect(result).toEqual({
+      criterionId: "c1",
+      status: "unknown",
+      evidence: [`工作经历：${source}`]
+    });
   });
 
   it("keeps a clear exact candidate-owned experience fact and its complete clause", () => {
@@ -190,7 +207,11 @@ describe("evaluateObjectiveRules", () => {
 
     expect(facts.yearsExperience).toBe(5);
     expect(facts.yearsExperienceEvidence).toBe("工作经历：拥有 5 年工作经验");
-    expect(result).toEqual({ criterionId: "c1", status: "unknown", evidence: [] });
+    expect(result).toEqual({
+      criterionId: "c1",
+      status: "unknown",
+      evidence: ["工作经历：拥有 5 年工作经验"]
+    });
   });
 
   it.each([
@@ -217,7 +238,12 @@ describe("evaluateObjectiveRules", () => {
 
     expect(facts.tokens.has("pmp")).toBe(false);
     expect(facts.tokenEvidence?.get("pmp")).toBeUndefined();
-    expect(result).toEqual({ criterionId: "c1", status: "unknown", evidence: [] });
+    expect(facts.sourceEvidence?.certificates.get("pmp")).toEqual([`技能：${source}`]);
+    expect(result).toEqual({
+      criterionId: "c1",
+      status: "unknown",
+      evidence: [`技能：${source}`]
+    });
   });
 
   it.each([
@@ -231,7 +257,11 @@ describe("evaluateObjectiveRules", () => {
 
     expect(facts.tokens.has("pmp")).toBe(true);
     expect(facts.tokenEvidence?.get("pmp")).toEqual([`技能：${source}`]);
-    expect(result).toEqual({ criterionId: "c1", status: "unknown", evidence: [] });
+    expect(result).toEqual({
+      criterionId: "c1",
+      status: "unknown",
+      evidence: [`技能：${source}`]
+    });
   });
 
   it("retains the complete source fragment for clear positive experience and credential evidence", () => {
@@ -250,8 +280,16 @@ describe("evaluateObjectiveRules", () => {
       criterion("必须有 5 年以上经验"),
       { ...criterion("必须持有 PMP"), id: "c2" }
     ], facts)).toEqual([
-      { criterionId: "c1", status: "unknown", evidence: [] },
-      { criterionId: "c2", status: "unknown", evidence: [] }
+      {
+        criterionId: "c1",
+        status: "unknown",
+        evidence: ["工作经历：本人拥有 8 年以上工作经验，专注企业软件产品"]
+      },
+      {
+        criterionId: "c2",
+        status: "unknown",
+        evidence: ["技能：本人已通过 PMP 认证，证书当前有效"]
+      }
     ]);
   });
 
@@ -278,7 +316,11 @@ describe("evaluateObjectiveRules", () => {
     expect(evaluateObjectiveRules(
       [criterion("必须有 5 年以上经验")],
       facts
-    )).toEqual([{ criterionId: "c1", status: "unknown", evidence: [] }]);
+    )).toEqual([{
+      criterionId: "c1",
+      status: "unknown",
+      evidence: [`工作经历：${source}`]
+    }]);
   });
 
   it.each([
@@ -305,8 +347,116 @@ describe("evaluateObjectiveRules", () => {
     expect(evaluateObjectiveRules(
       [criterion("必须持有 PMP")],
       facts
-    )).toEqual([{ criterionId: "c1", status: "unknown", evidence: [] }]);
+    )).toEqual([{
+      criterionId: "c1",
+      status: "unknown",
+      evidence: [`技能：${source}`]
+    }]);
   });
+
+  it("keeps contradictory location source evidence visible without inferring availability", () => {
+    const facts = extractObjectiveFacts(draftWith({ basics: "现居地：北京" }));
+    const [result] = evaluateObjectiveRules([criterion("工作地点：上海")], facts);
+
+    expect(facts.sourceEvidence.locations).toEqual(["基本信息：现居地：北京"]);
+    expect(result).toEqual({
+      criterionId: "c1",
+      status: "unknown",
+      evidence: ["基本信息：现居地：北京"]
+    });
+  });
+
+  it.each([
+    {
+      label: "years fact above threshold",
+      text: "必须有 5 年以上经验",
+      facts: {
+        tokens: new Set<string>(),
+        yearsExperience: 8,
+        sourceEvidence: {
+          yearsExperience: ["工作经历：工作年限待猎头核实"],
+          certificates: new Map<string, string[]>(),
+          locations: []
+        }
+      }
+    },
+    {
+      label: "years fact below threshold",
+      text: "必须有 5 年以上经验",
+      facts: {
+        tokens: new Set<string>(),
+        yearsExperience: 3,
+        sourceEvidence: {
+          yearsExperience: ["工作经历：工作年限待猎头核实"],
+          certificates: new Map<string, string[]>(),
+          locations: []
+        }
+      }
+    },
+    {
+      label: "certificate token present",
+      text: "必须持有 PMP",
+      facts: {
+        tokens: new Set(["pmp"]),
+        sourceEvidence: {
+          yearsExperience: [],
+          certificates: new Map([["pmp", ["技能：PMP 状态待猎头核实"]]]),
+          locations: []
+        }
+      }
+    },
+    {
+      label: "certificate token absent",
+      text: "必须持有 PMP",
+      facts: {
+        tokens: new Set<string>(),
+        sourceEvidence: {
+          yearsExperience: [],
+          certificates: new Map([["pmp", ["技能：PMP 状态待猎头核实"]]]),
+          locations: []
+        }
+      }
+    },
+    {
+      label: "location fact matches",
+      text: "工作地点：上海",
+      facts: {
+        tokens: new Set<string>(),
+        locations: new Set(["上海"]),
+        sourceEvidence: {
+          yearsExperience: [],
+          certificates: new Map<string, string[]>(),
+          locations: ["基本信息：现居地待猎头核实"]
+        }
+      }
+    },
+    {
+      label: "location fact contradicts",
+      text: "工作地点：上海",
+      facts: {
+        tokens: new Set<string>(),
+        locations: new Set(["北京"]),
+        sourceEvidence: {
+          yearsExperience: [],
+          certificates: new Map<string, string[]>(),
+          locations: ["基本信息：现居地待猎头核实"]
+        }
+      }
+    }
+  ] satisfies ReadonlyArray<{ label: string; text: string; facts: ObjectiveFacts }>)(
+    "keeps $label unknown with the same recruiter evidence",
+    ({ text, facts }) => {
+      const [result] = evaluateObjectiveRules([criterion(text)], facts);
+      const expectedEvidence = text.includes("PMP")
+        ? facts.sourceEvidence?.certificates.get("pmp")
+        : text.includes("地点")
+          ? facts.sourceEvidence?.locations
+          : facts.sourceEvidence?.yearsExperience;
+
+      expect(result?.status).toBe("unknown");
+      expect(result?.evidence).toEqual(expectedEvidence);
+    }
+  );
 
   it.each(["和田", "共和"])("keeps the explicit %s location unknown without misparsing its characters", (location) => {
     const [result] = evaluateObjectiveRules(
