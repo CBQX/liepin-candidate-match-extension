@@ -126,11 +126,6 @@ const evaluateCriterion = (criterion: JobCriterion, facts: ObjectiveFacts): Rule
 
   const location = parseSupportedLocation(criterion.text);
   if (location) {
-    const locations = facts.locations ?? new Set<string>();
-    if (locations.size === 0) return evaluation(criterion.id, "unknown");
-    if (locations.has(location)) {
-      return evaluation(criterion.id, "met", [`明确地点：${location}`]);
-    }
     return evaluation(criterion.id, "unknown");
   }
 

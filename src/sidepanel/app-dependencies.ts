@@ -5,6 +5,8 @@ import {
   type ProviderSettings
 } from "../repositories/chrome-provider-settings";
 import type { CandidateDraft } from "../shared/contracts/candidate";
+import type { Job } from "../shared/contracts/job";
+import type { MatchAnalysis } from "../shared/contracts/matching";
 import {
   pageContextChangedEventSchema,
   type RuntimeResponse
@@ -21,6 +23,7 @@ export interface SidePanelDependencies {
   jobs: JobRepository;
   validateProvider(): Promise<RuntimeResponse<{ valid: true }>>;
   extractCurrentCandidate(): Promise<RuntimeResponse<CandidateDraft>>;
+  analyzeCandidate(job: Job, candidateDraft: CandidateDraft): Promise<RuntimeResponse<MatchAnalysis>>;
   subscribeToPageContextChanges(listener: () => void): () => void;
 }
 
@@ -37,6 +40,9 @@ export const appDependencies: SidePanelDependencies = {
   },
   extractCurrentCandidate() {
     return chrome.runtime.sendMessage({ type: "EXTRACT_CURRENT_CANDIDATE" });
+  },
+  analyzeCandidate(job, candidateDraft) {
+    return chrome.runtime.sendMessage({ type: "ANALYZE_CANDIDATE", job, candidateDraft });
   },
   subscribeToPageContextChanges(listener) {
     const runtimeListener = (message: unknown) => {

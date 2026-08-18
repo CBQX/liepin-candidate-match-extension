@@ -65,29 +65,36 @@ describe("evaluateObjectiveRules", () => {
     expect(result).toEqual({ criterionId: "c1", status: "unknown", evidence: [] });
   });
 
-  it("matches explicit location and certificate tokens", () => {
-    const results = evaluateObjectiveRules(
-      [criterion("工作地点：上海"), { ...criterion("必须持有 PMP"), id: "c2" }],
-      { tokens: new Set(["pmp"]), locations: new Set(["上海"]) }
+  it("keeps an explicit location unknown even when the visible location matches exactly", () => {
+    // Break caught: fragile location grammar could turn a visible current location into a deterministic job-location match.
+    const [result] = evaluateObjectiveRules(
+      [criterion("工作地点：上海")],
+      { tokens: new Set(), locations: new Set(["上海"]) }
     );
 
-    expect(results).toEqual([
-      { criterionId: "c1", status: "met", evidence: ["明确地点：上海"] },
-      { criterionId: "c2", status: "met", evidence: ["明确证书：PMP"] }
-    ]);
+    expect(result).toEqual({ criterionId: "c1", status: "unknown", evidence: [] });
   });
 
-  it.each(["和田", "共和"])("matches an explicit %s location without treating its characters as conjunctions", (location) => {
+  it("matches an explicit certificate token", () => {
     const [result] = evaluateObjectiveRules(
-      [criterion(`工作地点：${location}`)],
-      { tokens: new Set(), locations: new Set([location]) }
+      [criterion("必须持有 PMP")],
+      { tokens: new Set(["pmp"]), locations: new Set(["上海"]) }
     );
 
     expect(result).toEqual({
       criterionId: "c1",
       status: "met",
-      evidence: [`明确地点：${location}`]
+      evidence: ["明确证书：PMP"]
     });
+  });
+
+  it.each(["和田", "共和"])("keeps the explicit %s location unknown without misparsing its characters", (location) => {
+    const [result] = evaluateObjectiveRules(
+      [criterion(`工作地点：${location}`)],
+      { tokens: new Set(), locations: new Set([location]) }
+    );
+
+    expect(result).toEqual({ criterionId: "c1", status: "unknown", evidence: [] });
   });
 
   it.each([
@@ -95,33 +102,25 @@ describe("evaluateObjectiveRules", () => {
     "新疆且末县",
     "新疆维吾尔自治区和田地区",
     "内蒙古自治区呼和浩特市"
-  ])("matches an explicit %s administrative location without treating name characters as conjunctions", (location) => {
+  ])("keeps the explicit %s administrative location unknown", (location) => {
     const [result] = evaluateObjectiveRules(
       [criterion(`工作地点：${location}`)],
       { tokens: new Set(), locations: new Set([location]) }
     );
 
-    expect(result).toEqual({
-      criterionId: "c1",
-      status: "met",
-      evidence: [`明确地点：${location}`]
-    });
+    expect(result).toEqual({ criterionId: "c1", status: "unknown", evidence: [] });
   });
 
   it.each([
     "Singapore",
     "HongKong"
-  ])("matches an explicit Latin location atom: %s", (location) => {
+  ])("keeps an explicit Latin location atom unknown: %s", (location) => {
     const [result] = evaluateObjectiveRules(
       [criterion(`Location: ${location}`)],
       { tokens: new Set(), locations: new Set([location]) }
     );
 
-    expect(result).toEqual({
-      criterionId: "c1",
-      status: "met",
-      evidence: [`明确地点：${location}`]
-    });
+    expect(result).toEqual({ criterionId: "c1", status: "unknown", evidence: [] });
   });
 
   it("keeps compound location and availability wording unknown", () => {

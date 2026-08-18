@@ -85,6 +85,10 @@ function createFakeDependencies(initial: {
     jobs: jobRepository,
     validateProvider,
     extractCurrentCandidate,
+    analyzeCandidate: vi.fn(async () => ({
+      ok: false as const,
+      error: { code: "UNKNOWN" as const, message: "测试中未配置分析结果。" }
+    })),
     subscribeToPageContextChanges: vi.fn(() => () => undefined)
   } satisfies SidePanelDependencies;
 }

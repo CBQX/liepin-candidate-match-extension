@@ -67,6 +67,10 @@ function createDependencies() {
     },
     validateProvider: vi.fn(async () => ({ ok: true as const, data: { valid: true as const } })),
     extractCurrentCandidate,
+    analyzeCandidate: vi.fn(async () => ({
+      ok: false as const,
+      error: { code: "UNKNOWN" as const, message: "测试中未配置分析结果。" }
+    })),
     subscribeToPageContextChanges: vi.fn((listener: () => void) => {
       pageContextListener = listener;
       return () => {

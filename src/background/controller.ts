@@ -2,6 +2,8 @@ import type { RuntimeRequest, RuntimeResponse } from "../shared/contracts/messag
 import type { ProviderSettings } from "../repositories/chrome-provider-settings";
 import type { ModelProvider } from "../providers/model-provider";
 import { mapProviderError } from "../providers/deepseek/deepseek-provider";
+import { redactCandidateDraft } from "../shared/privacy";
+import { analyzeCandidate } from "./analyze-candidate";
 
 type ActiveTab = Pick<chrome.tabs.Tab, "id" | "url"> | undefined;
 
@@ -63,6 +65,32 @@ export function createBackgroundController(
 
           await provider.validateCredentials(settings);
           return { ok: true, data: { valid: true } };
+        } catch (error) {
+          return { ok: false, error: mapProviderError(error) };
+        }
+      }
+
+      if (request.type === "ANALYZE_CANDIDATE") {
+        try {
+          const settings = await dependencies.loadProviderSettings();
+          if (!settings || settings.apiKey.trim() === "") {
+            return {
+              ok: false,
+              error: mapProviderError({ code: "MISSING_API_KEY" })
+            };
+          }
+
+          const provider = dependencies.resolveProvider(settings.providerId);
+          if (!provider) {
+            return unknownRequest();
+          }
+
+          const analysis = await analyzeCandidate(request, {
+            provider,
+            settings,
+            redact: redactCandidateDraft
+          });
+          return { ok: true, data: analysis };
         } catch (error) {
           return { ok: false, error: mapProviderError(error) };
         }

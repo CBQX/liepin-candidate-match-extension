@@ -267,6 +267,176 @@ select:disabled {
   width: 100%;
 }
 
+.analysis-progress {
+  text-align: center;
+}
+
+.progress-spinner {
+  display: block;
+  width: 42px;
+  height: 42px;
+  margin: 0 auto 14px;
+  border: 4px solid #dce8d9;
+  border-top-color: #337044;
+  border-radius: 50%;
+  animation: progress-spin 0.9s linear infinite;
+}
+
+@keyframes progress-spin {
+  to { transform: rotate(360deg); }
+}
+
+.analysis-result {
+  display: grid;
+  gap: 18px;
+}
+
+.result-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-radius: 12px;
+  background: #edf5e9;
+  padding: 14px;
+}
+
+.score-block,
+.summary-badges {
+  display: grid;
+  gap: 3px;
+}
+
+.score-block {
+  color: #536057;
+  font-size: 11px;
+}
+
+.score-value {
+  color: #225f37;
+  font-size: 36px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.summary-badges {
+  justify-items: end;
+}
+
+.summary-badges strong {
+  color: #225f37;
+  font-size: 18px;
+}
+
+.summary-badges span {
+  color: #667169;
+  font-size: 12px;
+}
+
+.result-section {
+  display: grid;
+  gap: 9px;
+  border-top: 1px solid #e3e8df;
+  padding-top: 16px;
+}
+
+.result-section h3,
+.result-section h4,
+.result-section p,
+.result-section ul {
+  margin: 0;
+}
+
+.result-section h3 {
+  font-size: 16px;
+}
+
+.result-section h4 {
+  font-size: 14px;
+}
+
+.result-section ul {
+  padding-left: 19px;
+}
+
+.result-section li,
+.recruiter-conclusion p {
+  color: #49534c;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.dimension-list,
+.hard-requirement-list,
+.evidence-items {
+  display: grid;
+  gap: 12px;
+  padding: 0 !important;
+  list-style: none;
+}
+
+.dimension-list > li,
+.hard-requirement-list > li,
+.evidence-items > li {
+  border-radius: 10px;
+  background: #f7f9f4;
+  padding: 11px;
+}
+
+.dimension-heading,
+.requirement-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.dimension-heading span,
+.requirement-status {
+  color: #5d695f;
+  font-size: 10px;
+}
+
+.requirement-status {
+  border-radius: 999px;
+  padding: 3px 7px;
+  background: #fff2d5;
+  color: #805b0a;
+  font-weight: 800;
+}
+
+.requirement-status-met {
+  background: #dceedd;
+  color: #28643a;
+}
+
+.requirement-status-not_met {
+  background: #f9dfdc;
+  color: #96352f;
+}
+
+.evidence-columns {
+  display: grid;
+  gap: 9px;
+  margin-top: 8px;
+}
+
+.evidence-columns strong {
+  color: #687169;
+  font-size: 10px;
+}
+
+.result-empty {
+  margin: 0;
+}
+
+.recruiter-conclusion {
+  border-radius: 10px;
+  background: #edf5e9;
+  padding: 14px;
+}
+
 .loading-state {
   margin: 20px 0;
   text-align: center;

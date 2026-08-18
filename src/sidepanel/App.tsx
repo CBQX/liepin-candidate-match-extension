@@ -3,6 +3,7 @@ import { JobService, type CreateJobInput } from "../domain/jobs/job-service";
 import type { ProviderSettings } from "../repositories/chrome-provider-settings";
 import { candidateDraftSchema } from "../shared/contracts/candidate";
 import type { Job } from "../shared/contracts/job";
+import { matchAnalysisSchema } from "../shared/contracts/matching";
 import type { AppError } from "../shared/errors";
 import { redactCandidateDraft } from "../shared/privacy";
 import {
@@ -12,6 +13,8 @@ import {
 import type { SidePanelDependencies } from "./app-dependencies";
 import { CandidatePreview } from "./components/CandidatePreview";
 import { ErrorState } from "./components/ErrorState";
+import { AnalysisProgress } from "./components/AnalysisProgress";
+import { AnalysisResult } from "./components/AnalysisResult";
 import { JobForm } from "./components/JobForm";
 import { JobSelector } from "./components/JobSelector";
 import { ModelSettingsForm } from "./components/ModelSettingsForm";
@@ -32,6 +35,8 @@ export function App({ deps }: AppProps) {
   const [switchError, setSwitchError] = useState("");
   const [loadError, setLoadError] = useState("");
   const [extractionError, setExtractionError] = useState<AppError>();
+  const [analysisError, setAnalysisError] = useState<AppError>();
+  const [analyzing, setAnalyzing] = useState(false);
   const [analysisSession, dispatchAnalysisSession] = useReducer(
     analysisSessionReducer,
     analysisSessionInitialState
@@ -65,11 +70,15 @@ export function App({ deps }: AppProps) {
     const clearForPageChange = () => {
       extractionGeneration.current += 1;
       setExtractionError(undefined);
+      setAnalysisError(undefined);
+      setAnalyzing(false);
       dispatchAnalysisSession({ type: "PAGE_CHANGED" });
     };
     const endSession = () => {
       extractionGeneration.current += 1;
       setExtractionError(undefined);
+      setAnalysisError(undefined);
+      setAnalyzing(false);
       dispatchAnalysisSession({ type: "SESSION_ENDED" });
     };
     const unsubscribe = deps.subscribeToPageContextChanges(clearForPageChange);
@@ -104,6 +113,8 @@ export function App({ deps }: AppProps) {
       extractionGeneration.current += 1;
       dispatchAnalysisSession({ type: "JOB_CHANGED" });
       setExtractionError(undefined);
+      setAnalysisError(undefined);
+      setAnalyzing(false);
       const savedJob = await new JobService(deps.jobs).createAndActivate(input);
       setJobs(await deps.jobs.list());
       setActiveJob(savedJob);
@@ -123,6 +134,8 @@ export function App({ deps }: AppProps) {
     extractionGeneration.current += 1;
     dispatchAnalysisSession({ type: "JOB_CHANGED" });
     setExtractionError(undefined);
+    setAnalysisError(undefined);
+    setAnalyzing(false);
     try {
       await deps.jobs.activate(id);
       setActiveJob(selectedJob);
@@ -139,6 +152,8 @@ export function App({ deps }: AppProps) {
     const requestGeneration = extractionGeneration.current + 1;
     extractionGeneration.current = requestGeneration;
     setExtractionError(undefined);
+    setAnalysisError(undefined);
+    setAnalyzing(false);
     try {
       const response = await deps.extractCurrentCandidate();
       if (requestGeneration !== extractionGeneration.current) return undefined;
@@ -171,6 +186,51 @@ export function App({ deps }: AppProps) {
     }
   }
 
+  async function analyzeCurrentCandidate() {
+    const draft = analysisSession.draft;
+    if (!activeJob || !draft) return undefined;
+
+    const requestGeneration = extractionGeneration.current + 1;
+    extractionGeneration.current = requestGeneration;
+    setAnalysisError(undefined);
+    setAnalyzing(true);
+
+    try {
+      const response = await deps.analyzeCandidate(activeJob, draft);
+      if (requestGeneration !== extractionGeneration.current) return undefined;
+      if (!response.ok) {
+        setAnalysisError(response.error);
+        return undefined;
+      }
+
+      const parsedAnalysis = matchAnalysisSchema.safeParse(response.data);
+      if (!parsedAnalysis.success) {
+        setAnalysisError({
+          code: "INVALID_MODEL_OUTPUT",
+          message: "模型返回内容无法验证，请重试。"
+        });
+        return undefined;
+      }
+
+      dispatchAnalysisSession({ type: "RESULT_LOADED", result: parsedAnalysis.data });
+      return undefined;
+    } catch {
+      if (requestGeneration !== extractionGeneration.current) return undefined;
+      setAnalysisError({
+        code: "UNKNOWN",
+        message: "匹配分析失败，请检查网络后重试。"
+      });
+      return undefined;
+    } finally {
+      if (requestGeneration === extractionGeneration.current) {
+        setAnalyzing(false);
+      }
+    }
+  }
+
+  const credentialError = analysisError?.code === "MISSING_API_KEY"
+    || analysisError?.code === "INVALID_API_KEY";
+
   return (
     <main className="app-shell">
       <header className="app-header">
@@ -201,7 +261,33 @@ export function App({ deps }: AppProps) {
         <JobForm onSave={saveJob} />
       )}
       {!loadError && setupState === "ready" && !addingJob && activeJob && (
-        analysisSession.draft ? (
+        analysisSession.result ? (
+          <AnalysisResult analysis={analysisSession.result} job={activeJob} />
+        ) : analyzing ? (
+          <AnalysisProgress />
+        ) : analysisError ? (
+          <section className="panel-card error-card" aria-labelledby="analysis-failure-title" role="alert">
+            <p className="eyebrow">分析未完成</p>
+            <h2 id="analysis-failure-title">
+              {credentialError ? "需要重新配置模型" : "本次匹配分析未完成"}
+            </h2>
+            <p className="muted">{analysisError.message}</p>
+            <button
+              className="primary-button"
+              type="button"
+              onClick={() => {
+                if (credentialError) {
+                  setAnalysisError(undefined);
+                  setSetupState("needs_model");
+                } else {
+                  void analyzeCurrentCandidate();
+                }
+              }}
+            >
+              {credentialError ? "重新配置模型" : "重试分析"}
+            </button>
+          </section>
+        ) : analysisSession.draft ? (
           <CandidatePreview
             draft={analysisSession.draft}
             onChange={(section, text) => dispatchAnalysisSession({
@@ -209,7 +295,7 @@ export function App({ deps }: AppProps) {
               section,
               text
             })}
-            onConfirm={() => undefined}
+            onConfirm={() => void analyzeCurrentCandidate()}
           />
         ) : extractionError ? (
           <ErrorState error={extractionError} onRetry={() => void matchAnalysis()} />
