@@ -102,7 +102,9 @@ export class DeepSeekProvider implements ModelProvider {
     { id: "deepseek-v4-pro", label: "DeepSeek V4 Pro" }
   ] as const;
 
-  constructor(private readonly fetcher: Fetcher = fetch) {}
+  constructor(
+    private readonly fetcher: Fetcher = (input, init) => globalThis.fetch(input, init)
+  ) {}
 
   async validateCredentials(settings: ProviderSettings): Promise<void> {
     this.requireApiKey(settings);

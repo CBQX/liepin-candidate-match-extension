@@ -93,6 +93,7 @@ async function caught(operation: Promise<unknown>): Promise<unknown> {
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.unstubAllGlobals();
 });
 
 describe("DeepSeekProvider", () => {
@@ -121,6 +122,22 @@ describe("DeepSeekProvider", () => {
         headers: expect.objectContaining({ Authorization: "Bearer sk-test" })
       })
     );
+  });
+
+  it("invokes the default browser fetch with the global receiver", async () => {
+    // Break caught: storing global fetch as a class field and calling this.fetcher causes Chrome Illegal invocation.
+    const receiverSensitiveFetch = vi.fn(function (this: unknown) {
+      if (this !== globalThis) {
+        throw new TypeError("Illegal invocation");
+      }
+      return Promise.resolve(new Response(JSON.stringify({
+        object: "list",
+        data: [{ id: "deepseek-v4-pro", object: "model", owned_by: "deepseek" }]
+      }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    });
+    vi.stubGlobal("fetch", receiverSensitiveFetch);
+
+    await expect(new DeepSeekProvider().validateCredentials(settings)).resolves.toBeUndefined();
   });
 
   it("rejects validation when the selected model is absent from the provider model list", async () => {
