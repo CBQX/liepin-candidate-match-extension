@@ -112,18 +112,20 @@ export class DeepSeekProvider implements ModelProvider {
 
   async validateCredentials(settings: ProviderSettings): Promise<void> {
     this.requireApiKey(settings);
-    const response = await this.fetchWithTimeout(`${API_BASE}/models`, {
+    this.requireSupportedModel(settings);
+    await this.fetchWithTimeout(`${API_BASE}/models`, {
       method: "GET",
       headers: this.headers(settings)
+    }, async (response) => {
+      if (!response.ok) {
+        throw await providerErrorFromResponse(response);
+      }
     });
-
-    if (!response.ok) {
-      throw await providerErrorFromResponse(response);
-    }
   }
 
   async analyze(input: MatchInput, settings: ProviderSettings): Promise<ModelMatchResult> {
     this.requireApiKey(settings);
+    this.requireSupportedModel(settings);
     const prompt = buildAnalysisPrompt(input);
 
     for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -135,24 +137,29 @@ export class DeepSeekProvider implements ModelProvider {
         messages.push({ role: "user", content: REPAIR_INSTRUCTION });
       }
 
-      const response = await this.fetchWithTimeout(`${API_BASE}/chat/completions`, {
-        method: "POST",
-        headers: this.headers(settings),
-        body: JSON.stringify({
-          model: settings.model,
-          messages,
-          response_format: { type: "json_object" },
-          thinking: { type: "disabled" },
-          max_tokens: 8192
-        })
-      });
-
-      if (!response.ok) {
-        throw await providerErrorFromResponse(response);
-      }
-
       try {
-        return parseCompletion(await response.json());
+        const payload = await this.fetchWithTimeout(`${API_BASE}/chat/completions`, {
+          method: "POST",
+          headers: this.headers(settings),
+          body: JSON.stringify({
+            model: settings.model,
+            messages,
+            response_format: { type: "json_object" },
+            thinking: { type: "disabled" },
+            max_tokens: 8192
+          })
+        }, async (response) => {
+          if (!response.ok) {
+            throw await providerErrorFromResponse(response);
+          }
+
+          try {
+            return await response.json();
+          } catch {
+            throw new ProviderError("INVALID_MODEL_OUTPUT");
+          }
+        });
+        return parseCompletion(payload);
       } catch (error) {
         if (!(error instanceof ProviderError) || error.code !== "INVALID_MODEL_OUTPUT" || attempt === 1) {
           throw error;
@@ -169,6 +176,12 @@ export class DeepSeekProvider implements ModelProvider {
     }
   }
 
+  private requireSupportedModel(settings: ProviderSettings): void {
+    if (!this.models.some((model) => model === settings.model)) {
+      throw new ProviderError("UNKNOWN", "不支持的 DeepSeek 模型配置。");
+    }
+  }
+
   private headers(settings: ProviderSettings): Record<string, string> {
     return {
       Authorization: `Bearer ${settings.apiKey}`,
@@ -176,12 +189,17 @@ export class DeepSeekProvider implements ModelProvider {
     };
   }
 
-  private async fetchWithTimeout(url: string, init: RequestInit): Promise<Response> {
+  private async fetchWithTimeout<T>(
+    url: string,
+    init: RequestInit,
+    consume: (response: Response) => Promise<T>
+  ): Promise<T> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
     try {
-      return await this.fetcher(url, { ...init, signal: controller.signal });
+      const response = await this.fetcher(url, { ...init, signal: controller.signal });
+      return await consume(response);
     } catch (error) {
       if (controller.signal.aborted) {
         throw new ProviderError("MODEL_TIMEOUT");

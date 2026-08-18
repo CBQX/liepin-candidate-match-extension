@@ -135,6 +135,18 @@ describe("DeepSeekProvider", () => {
     expect(init?.headers).toMatchObject({ Authorization: "Bearer sk-test" });
   });
 
+  it("rejects an unsupported model before contacting DeepSeek", async () => {
+    // Break caught: forwarding an arbitrary stored model id would bypass the adapter's exact V4 allowlist.
+    const fetcher = vi.fn<Fetcher>().mockResolvedValue(completion(JSON.stringify(modelResult)));
+
+    await expect(new DeepSeekProvider(fetcher).analyze(input, {
+      ...settings,
+      model: "deepseek-v3"
+    })).rejects.toMatchObject({ code: "UNKNOWN" });
+
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
   it("retries empty content exactly once with a repair instruction", async () => {
     // Break caught: accepting empty JSON-mode output or retrying without a strict bound can hide failures or loop.
     const fetcher = vi.fn<Fetcher>()
@@ -156,6 +168,22 @@ describe("DeepSeekProvider", () => {
 
     await expect(new DeepSeekProvider(fetcher).analyze(input, settings)).resolves.toEqual(modelResult);
     expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
+  it("retries a malformed successful response envelope exactly once", async () => {
+    // Break caught: a Response.json SyntaxError must enter the bounded repair path instead of escaping as UNKNOWN.
+    const fetcher = vi.fn<Fetcher>()
+      .mockResolvedValueOnce(new Response("{", {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      }))
+      .mockResolvedValueOnce(completion(JSON.stringify(modelResult)));
+
+    await expect(new DeepSeekProvider(fetcher).analyze(input, settings)).resolves.toEqual(modelResult);
+
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    const retryBody = JSON.parse(String(fetcher.mock.calls[1]?.[1]?.body));
+    expect(retryBody.messages.at(-1).content).toMatch(/上一次.*修复.*完整 JSON/s);
   });
 
   it("returns INVALID_MODEL_OUTPUT after two invalid responses", async () => {
@@ -221,6 +249,37 @@ describe("DeepSeekProvider", () => {
 
     expect(mapProviderError(error)).toMatchObject({ code: "MODEL_TIMEOUT" });
     expect(fetcher.mock.calls[0]?.[1]?.signal).toBeInstanceOf(AbortSignal);
+    expect(fetcher.mock.calls[0]?.[1]?.signal?.aborted).toBe(true);
+  });
+
+  it("keeps the 60-second timeout active while reading the response body", async () => {
+    // Break caught: clearing the timer after headers arrive leaves response.json able to hang forever.
+    vi.useFakeTimers();
+    const fetcher = vi.fn<Fetcher>().mockImplementation((_url, init) => {
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          init?.signal?.addEventListener("abort", () => {
+            controller.error(new DOMException("The operation was aborted", "AbortError"));
+          });
+        }
+      });
+      return Promise.resolve(new Response(body, {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      }));
+    });
+    let settled = false;
+    const errorPromise = caught(new DeepSeekProvider(fetcher).analyze(input, settings))
+      .then((error) => {
+        settled = true;
+        return error;
+      });
+
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(settled).toBe(true);
+    expect(mapProviderError(await errorPromise)).toMatchObject({ code: "MODEL_TIMEOUT" });
+    expect(fetcher).toHaveBeenCalledTimes(1);
     expect(fetcher.mock.calls[0]?.[1]?.signal?.aborted).toBe(true);
   });
 
