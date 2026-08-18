@@ -21,7 +21,7 @@ const jobA: Job = {
 const jobB: Job = { ...jobA, id: "job-b", company: "乙公司" };
 
 const extractedDraft: CandidateDraft = {
-  basics: { text: "姓名：张三，手机 13812345678，上海", status: "complete" },
+  basics: { text: "张三，手机 13812345678，上海", status: "complete" },
   workExperience: { text: "甲公司产品经理", status: "complete" },
   projects: { text: "招聘系统", status: "possibly_incomplete" },
   education: { text: "本科", status: "complete" },

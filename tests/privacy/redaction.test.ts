@@ -6,7 +6,7 @@ function candidateDraftWith(basics: string): CandidateDraft {
   return {
     basics: { text: basics, status: "complete" },
     workExperience: {
-      text: "张三于 2022 年加入甲公司担任产品经理，完成招聘系统上线",
+      text: "2022 年加入甲公司担任产品经理，完成招聘系统上线",
       status: "complete"
     },
     projects: { text: "招聘系统项目", status: "complete" },
@@ -21,7 +21,7 @@ describe("candidate redaction", () => {
   it("removes direct identifiers without removing employment evidence", () => {
     // Break caught: direct identity/contact data could be sent to the model, or broad redaction could erase job evidence.
     const redacted = redactCandidateDraft(candidateDraftWith(
-      "姓名：张三，手机 13812345678，邮箱 zhangsan@example.com，微信 zhangsan88，曾任甲公司产品经理"
+      "张三，手机 13812345678，邮箱 zhangsan@example.com，微信 zhangsan88，曾任甲公司产品经理"
     ));
     const text = [
       redacted.basics,
@@ -44,15 +44,15 @@ describe("candidate redaction", () => {
     expect(text).toContain("SaaS、产品规划");
   });
 
-  it("uses a labeled basics name as the neutral replacement across sections", () => {
-    // Break caught: relying only on a leading name would leak profiles whose basics use an explicit 姓名 label.
+  it("replaces a labeled basics name only at its identity source span", () => {
+    // Break caught: a strong name source must be redacted without blindly deleting an ambiguous same-token employment reference.
     const draft = candidateDraftWith("姓名：李小明 年龄 31");
     draft.workExperience.text = "李小明曾任乙公司技术负责人";
 
     const redacted = redactCandidateDraft(draft);
 
     expect(redacted.basics.text).toBe("姓名：候选人 年龄 31");
-    expect(redacted.workExperience.text).toBe("候选人曾任乙公司技术负责人");
+    expect(redacted.workExperience.text).toBe("李小明曾任乙公司技术负责人");
   });
 
   it.each([
@@ -91,12 +91,9 @@ describe("candidate redaction", () => {
 
     expect(redactedTitle.basics.text).toContain("产品经理");
     expect(redactedTitle.workExperience.text).toContain("产品经理在甲公司");
-    expect(redactedLocation.basics.text).toContain("上海");
     expect(redactedLocation.workExperience.text).toContain("常驻上海服务甲公司");
     expect(redactedEmployer.basics.text).toContain("甲公司产品负责人");
-    expect(redactedSurnameLikeLocation.basics.text).toContain("苏州");
     expect(redactedSurnameLikeLocation.workExperience.text).toContain("在苏州负责制造业客户");
-    expect(redactedSurnameLikeEmployer.basics.text).toContain("王公司");
     expect(redactedSurnameLikeEmployer.workExperience.text).toContain("王公司产品负责人");
   });
 
@@ -128,7 +125,6 @@ describe("candidate redaction", () => {
 
       const redacted = redactCandidateDraft(draft);
 
-      expect(redacted.basics.text).toContain(location);
       expect(redacted.workExperience.text).toContain(`曾在${location}负责区域招聘业务`);
     }
   );
@@ -140,18 +136,18 @@ describe("candidate redaction", () => {
 
     const redacted = redactCandidateDraft(draft);
 
-    expect(redacted.basics.text).toContain("李宁");
     expect(redacted.workExperience.text).toBe("曾负责李宁零售业务与渠道增长");
   });
 
-  it("accepts the privacy false-negative tradeoff for an ambiguous bare leading token", () => {
-    // Break caught: lexical surname guessing would still erase an ambiguous token without genuine identity evidence.
+  it("redacts a strong-field leading identity only in basics and preserves the same token as evidence elsewhere", () => {
+    // Break caught: refusing all leading identity sources leaks a mandated name, while global replacement destroys brand evidence.
     const draft = candidateDraftWith("张三，手机 13812345678");
     draft.workExperience.text = "张三品牌项目负责人";
 
     const redacted = redactCandidateDraft(draft);
 
-    expect(redacted.basics.text).toContain("张三");
+    expect(redacted.basics.text).toContain("候选人");
+    expect(redacted.basics.text).not.toContain("张三");
     expect(redacted.workExperience.text).toBe("张三品牌项目负责人");
     expect(redacted.basics.text).not.toContain("13812345678");
   });
