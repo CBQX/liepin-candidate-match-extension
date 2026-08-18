@@ -6,7 +6,7 @@ function candidateDraftWith(basics: string): CandidateDraft {
   return {
     basics: { text: basics, status: "complete" },
     workExperience: {
-      text: "2022 年加入甲公司担任产品经理，完成招聘系统上线",
+      text: "张三于 2022 年加入甲公司担任产品经理，完成招聘系统上线",
       status: "complete"
     },
     projects: { text: "招聘系统项目", status: "complete" },
@@ -44,15 +44,15 @@ describe("candidate redaction", () => {
     expect(text).toContain("SaaS、产品规划");
   });
 
-  it("replaces a labeled basics name only at its identity source span", () => {
-    // Break caught: a strong name source must be redacted without blindly deleting an ambiguous same-token employment reference.
+  it("replaces a labeled basics name in a clear person-reference context", () => {
+    // Break caught: restricting redaction to the basics source span would leak the confirmed name in a clear employment sentence.
     const draft = candidateDraftWith("姓名：李小明 年龄 31");
     draft.workExperience.text = "李小明曾任乙公司技术负责人";
 
     const redacted = redactCandidateDraft(draft);
 
     expect(redacted.basics.text).toBe("姓名：候选人 年龄 31");
-    expect(redacted.workExperience.text).toBe("李小明曾任乙公司技术负责人");
+    expect(redacted.workExperience.text).toBe("候选人曾任乙公司技术负责人");
   });
 
   it.each([
