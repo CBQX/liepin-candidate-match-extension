@@ -140,6 +140,69 @@ describe("evaluateObjectiveRules", () => {
     ]);
   });
 
+  it.each([
+    "不到 5 年工作经验",
+    "不足 5 年工作经验",
+    "拥有 3–5 年工作经验",
+    "工作经验：3 至 5 年",
+    "最多 5 年工作经验",
+    "5 年以下工作经验"
+  ])("keeps non-lower-bound experience evidence unknown: %s", (source) => {
+    // Break caught: extracting the largest number from a negated, upper-bound, or ranged
+    // statement could incorrectly satisfy an at-least-five-years hard requirement.
+    const facts = extractObjectiveFacts(draftWith({ workExperience: source }));
+    const [result] = evaluateObjectiveRules(
+      [criterion("必须有 5 年以上经验")],
+      facts
+    );
+
+    expect(facts.yearsExperience).toBeUndefined();
+    expect(facts.yearsExperienceEvidence).toBeUndefined();
+    expect(result).toEqual({ criterionId: "c1", status: "unknown", evidence: [] });
+  });
+
+  it.each([
+    "未通过 PMP",
+    "计划考取 PMP",
+    "准备考 PMP",
+    "已过期 PMP",
+    "PMP 已过期"
+  ])("keeps negated, planned, or expired credential evidence unknown: %s", (source) => {
+    // Break caught: a token mention in the skills section must not become proof of
+    // current candidate-owned possession when the same clause denies or defers it.
+    const facts = extractObjectiveFacts(draftWith({ skills: source }));
+    const [result] = evaluateObjectiveRules([criterion("必须持有 PMP")], facts);
+
+    expect(facts.tokens.has("pmp")).toBe(false);
+    expect(facts.tokenEvidence?.get("pmp")).toBeUndefined();
+    expect(result).toEqual({ criterionId: "c1", status: "unknown", evidence: [] });
+  });
+
+  it("retains the complete source fragment for clear positive experience and credential evidence", () => {
+    // Break caught: truncating evidence to the matched number/token removes surrounding
+    // ownership and validity wording recruiters need to audit a deterministic decision.
+    const facts = extractObjectiveFacts(draftWith({
+      workExperience: "本人拥有 8 年以上工作经验，专注企业软件产品",
+      skills: "本人已通过 PMP 认证，证书当前有效"
+    }));
+
+    expect(evaluateObjectiveRules([
+      criterion("必须有 5 年以上经验"),
+      { ...criterion("必须持有 PMP"), id: "c2" }
+    ], facts)).toEqual([
+      {
+        criterionId: "c1",
+        status: "met",
+        evidence: ["工作经历：本人拥有 8 年以上工作经验，专注企业软件产品"]
+      },
+      {
+        criterionId: "c2",
+        status: "met",
+        evidence: ["技能：本人已通过 PMP 认证，证书当前有效"]
+      }
+    ]);
+  });
+
   it.each(["和田", "共和"])("keeps the explicit %s location unknown without misparsing its characters", (location) => {
     const [result] = evaluateObjectiveRules(
       [criterion(`工作地点：${location}`)],

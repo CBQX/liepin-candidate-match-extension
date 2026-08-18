@@ -2,6 +2,8 @@ import type { StorageAreaLike } from "./storage-area";
 
 const DEFAULT_DATABASE_NAME = "liepin-candidate-match-extension";
 const STORE_NAME = "persistentSettings";
+const MIGRATION_STORE_NAME = "migrationMetadata";
+const DATABASE_VERSION = 2;
 
 export class StorageAccessError extends Error {
   readonly code = "STORAGE_FAILED" as const;
@@ -80,6 +82,33 @@ export class IndexedDbStorageArea implements StorageAreaLike {
     });
   }
 
+  async migrateLegacyValues(
+    items: Record<string, unknown>,
+    markerKey: string
+  ): Promise<void> {
+    await this.withDatabase(async (database) => {
+      const transaction = database.transaction(
+        [STORE_NAME, MIGRATION_STORE_NAME],
+        "readwrite"
+      );
+      const persistentStore = transaction.objectStore(STORE_NAME);
+      const migrationStore = transaction.objectStore(MIGRATION_STORE_NAME);
+      const entries = Object.entries(items);
+      const [migrationComplete, ...existingValues] = await Promise.all([
+        requestResult(migrationStore.get(markerKey)),
+        ...entries.map(([key]) => requestResult(persistentStore.get(key)))
+      ]);
+
+      if (migrationComplete !== true) {
+        entries.forEach(([key, value], index) => {
+          if (existingValues[index] === undefined) persistentStore.put(value, key);
+        });
+        migrationStore.put(true, markerKey);
+      }
+      await transactionComplete(transaction);
+    });
+  }
+
   private async withDatabase<T>(operation: (database: IDBDatabase) => Promise<T>): Promise<T> {
     if (!this.databaseFactory) throw new StorageAccessError();
 
@@ -99,10 +128,13 @@ export class IndexedDbStorageArea implements StorageAreaLike {
     if (!this.databaseFactory) return Promise.reject(new StorageAccessError());
 
     return new Promise((resolve, reject) => {
-      const request = this.databaseFactory!.open(this.databaseName, 1);
+      const request = this.databaseFactory!.open(this.databaseName, DATABASE_VERSION);
       request.addEventListener("upgradeneeded", () => {
         if (!request.result.objectStoreNames.contains(STORE_NAME)) {
           request.result.createObjectStore(STORE_NAME);
+        }
+        if (!request.result.objectStoreNames.contains(MIGRATION_STORE_NAME)) {
+          request.result.createObjectStore(MIGRATION_STORE_NAME);
         }
       }, { once: true });
       request.addEventListener("success", () => resolve(request.result), { once: true });

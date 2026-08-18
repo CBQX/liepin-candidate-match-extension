@@ -1,12 +1,15 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { analyzeCandidate as runBackgroundAnalysis } from "../../src/background/analyze-candidate";
+import type { ModelProvider } from "../../src/providers/model-provider";
 import { App } from "../../src/sidepanel/App";
 import type { SidePanelDependencies } from "../../src/sidepanel/app-dependencies";
 import type { CandidateDraft } from "../../src/shared/contracts/candidate";
 import type { Job } from "../../src/shared/contracts/job";
-import type { MatchAnalysis } from "../../src/shared/contracts/matching";
+import type { MatchAnalysis, ModelMatchResult } from "../../src/shared/contracts/matching";
 import type { AppError } from "../../src/shared/errors";
+import { redactCandidateDraft } from "../../src/shared/privacy";
 
 afterEach(() => cleanup());
 
@@ -49,6 +52,17 @@ const result: MatchAnalysis = {
   verificationQuestions: ["核实求职意愿"],
   outreachAdvice: ["从产品经验切入"],
   recruiterConclusion: "建议推进"
+};
+
+const providerResult: ModelMatchResult = {
+  dimensionScores: result.dimensionScores,
+  matches: result.matches,
+  mismatches: result.mismatches,
+  risks: result.risks,
+  missingInformation: result.missingInformation,
+  verificationQuestions: result.verificationQuestions,
+  outreachAdvice: result.outreachAdvice,
+  recruiterConclusion: result.recruiterConclusion
 };
 
 function deferred<T>() {
@@ -288,6 +302,76 @@ describe("analysis workflow", () => {
     expect(screen.queryByText("猎头结论")).toBeNull();
     expect((screen.getByLabelText("技能") as HTMLTextAreaElement).value)
       .toBe("取消前已编辑：SaaS 与 AI");
+  });
+
+  it("keeps recognized identity redaction through cancel and retry", async () => {
+    // Break caught: cancellation could retain the edited draft but drop its private redaction context,
+    // allowing a recognized name pasted into multiple sections to reach the provider on retry.
+    const pending = deferred<Awaited<ReturnType<Analyze>>>();
+    const providerAnalyze = vi.fn<ModelProvider["analyze"]>().mockResolvedValue(providerResult);
+    const provider: ModelProvider = {
+      id: "deepseek",
+      models: [{ id: "deepseek-v4-pro", label: "DeepSeek V4 Pro" }],
+      validateCredentials: vi.fn(),
+      analyze: providerAnalyze
+    };
+    const deps = createDependencies(vi.fn<Analyze>()
+      .mockImplementationOnce(() => pending.promise)
+      .mockImplementationOnce(async (activeJob, draft, redactionContext) => ({
+        ok: true as const,
+        data: await runBackgroundAnalysis({
+          job: activeJob,
+          candidateDraft: draft,
+          redactionContext
+        }, {
+          provider,
+          settings: {
+            providerId: "deepseek",
+            model: "deepseek-v4-pro",
+            apiKey: "sk-test"
+          },
+          redact: redactCandidateDraft
+        })
+      })));
+    deps.extractCurrentCandidate.mockResolvedValueOnce({
+      ok: true,
+      data: {
+        ...candidateDraft,
+        workExperience: { text: "张三曾任甲公司产品经理", status: "complete" }
+      }
+    });
+    const user = userEvent.setup();
+    render(<App deps={deps} />);
+
+    await user.click(await screen.findByRole("button", { name: "匹配分析" }));
+    fireEvent.change(await screen.findByLabelText("项目经历"), {
+      target: { value: "张三负责招聘系统" }
+    });
+    fireEvent.change(screen.getByLabelText("技能"), {
+      target: { value: "SaaS；张三负责产品规划" }
+    });
+    await confirmPrivacyAndAnalyze(user);
+    await user.click(await screen.findByRole("button", { name: "取消分析" }));
+
+    expect(deps.cancelAnalysis).toHaveBeenCalledWith(
+      deps.analyzeCandidate.mock.calls[0]?.[3]
+    );
+    const privacyConfirmation = await screen.findByRole("checkbox", {
+      name: /我已检查.*姓名.*联系方式.*猎聘 ID/u
+    }) as HTMLInputElement;
+    expect(privacyConfirmation.checked).toBe(false);
+    expect((screen.getByRole("button", { name: "确认并分析" }) as HTMLButtonElement).disabled)
+      .toBe(true);
+
+    await user.click(privacyConfirmation);
+    await user.click(screen.getByRole("button", { name: "确认并分析" }));
+
+    expect(await screen.findByText("猎头结论")).toBeTruthy();
+    const providerInput = providerAnalyze.mock.calls[0]?.[0];
+    expect(JSON.stringify(providerInput)).not.toContain("张三");
+    expect(providerInput?.candidateDraft.workExperience.text).toContain("候选人");
+    expect(providerInput?.candidateDraft.projects.text).toContain("候选人");
+    expect(providerInput?.candidateDraft.skills.text).toContain("候选人");
   });
 
   it("cancels a running analysis when the recruiter starts adding a new job", async () => {

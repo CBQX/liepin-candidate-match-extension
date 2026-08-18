@@ -5,6 +5,11 @@
 - 当前阶段：C（可真实试用的 MVP）
 - 后续阶段：A（内部稳定使用）→ B（多客户商业化）
 
+> **存储方案补充（2026-08-18，取代第 11.1 节的原始 `chrome.storage.local` 持久化选择）：**
+> 最终安全复审后，持久岗位与用户主动记住的模型设置改用扩展源 IndexedDB；
+> `chrome.storage.session` 继续承载仅会话设置，`chrome.storage.local` 只作为旧版本迁移源。
+> 原设计的产品阶段、BYOK 与“不持久化候选人”决策不变。
+
 ## 1. 背景与目标
 
 本项目为猎头提供一款优先兼容 Windows 与 macOS 版 Google Chrome 的浏览器插件。猎头先配置本次招聘的公司、职位 JD 和个性化要求，再打开猎聘中的单个候选人详情页，手动触发“匹配分析”。插件从当前页面提取候选人信息，经用户校对后，给出匹配度、匹配与不匹配理由、风险、信息缺口和猎头推进建议。
@@ -126,7 +131,7 @@ background/       Service Worker、消息协调、模型请求和错误映射
 domain/jobs/      岗位实体、校验、当前岗位和岗位切换
 domain/matching/  规则评分、权重合成、推荐等级和可信度
 providers/        ModelProvider 接口与 DeepSeek 适配器
-repositories/     JobRepository 接口与 Chrome 本地实现
+repositories/     JobRepository、扩展源 IndexedDB、会话存储与旧数据迁移适配器
 shared/contracts/ 跨模块消息、候选人草稿和分析结果协议
 ```
 
@@ -306,16 +311,19 @@ DeepSeek 官方提示 JSON 输出可能偶发空内容。MVP 对空响应、格�
 
 ### 11.1 持久化数据
 
-`chrome.storage.local` 保存：
+原始批准设计选择用 `chrome.storage.local` 保存岗位、当前岗位 ID、模型供应商选择，以及用户主动选择“记住此设备”时的 API Key。该具体介质选择已由本节开头所述的最终安全复审决定取代；保留此说明是为了准确记录设计演进，而不是继续指导实现。
+
+当前实现使用扩展源 IndexedDB 保存：
 
 - 岗位列表。
 - 当前岗位 ID。
-- 模型供应商选择。
-- 用户主动选择“记住此设备”时的 API Key。
+- 用户主动选择“记住此设备”时的模型供应商、模型与 API Key。
 
-`chrome.storage.session` 保存默认会话级 API Key。候选人草稿和分析结果只在界面内存中存在，不写入 `storage.local`、`storage.sync`、IndexedDB 或日志。
+`chrome.storage.session` 保存未勾选“记住此设备”时的会话级模型设置与 API Key。`chrome.storage.local` 不再承担正常持久化，只在升级时读取旧版的 `jobs`、`activeJobId` 和 `providerSettings`；迁移以单个 IndexedDB 读写事务执行“仅缺失写入 + 幂等标记”，成功后只删除这三个旧键，不覆盖更新的 IndexedDB 值。
 
-本地和会话存储的访问级别限制为扩展可信上下文，Content Script 无权直接读取岗位和 API Key。
+候选人草稿、姓名脱敏上下文和分析结果只在当前界面内存中存在，不写入 `storage.local`、`storage.session`、`storage.sync`、IndexedDB 或日志。
+
+选择扩展源 IndexedDB 是 Chrome 116 的纵深隐私边界：`chrome.storage.local` 默认可供 Content Script 使用，虽然可以调用 `setAccessLevel()` 收窄访问，但仍依赖正确初始化；扩展页面和 Service Worker 共享扩展源 IndexedDB，而 Content Script 调用 Web Storage/IndexedDB 时使用所在猎聘页面的源，不能直接打开扩展源数据库。`chrome.storage.session` 保持可信上下文访问。由此 Content Script 无权直接读取岗位或 API Key。
 
 ### 11.2 权限
 
@@ -426,12 +434,13 @@ MVP 只申请完成任务所需的权限：
 - 使用浏览器侧边栏作为主界面。
 - 保存多个岗位，同一时间只有一个当前岗位。
 - 最低支持 Chrome 116，Windows 与 macOS 共用构建。
-- API Key 默认会话保存，可由用户主动选择本地记住。
+- API Key 默认保存于 `chrome.storage.session`；用户主动选择本地记住时保存于扩展源 IndexedDB。
 
 ## 17. 参考资料
 
 - [Chrome Side Panel API](https://developer.chrome.com/docs/extensions/reference/api/sidePanel)
 - [Chrome Storage API](https://developer.chrome.com/docs/extensions/reference/api/storage)
+- [Chrome 扩展 Storage and cookies](https://developer.chrome.com/docs/extensions/develop/concepts/storage-and-cookies)
 - [Chrome 扩展隐私建议](https://developer.chrome.com/docs/extensions/develop/security-privacy/user-privacy)
 - [DeepSeek JSON Output](https://api-docs.deepseek.com/guides/json_mode/)
 - [DeepSeek Chat Completion API](https://api-docs.deepseek.com/api/create-chat-completion)

@@ -66,10 +66,10 @@ describe("analysis session reducer", () => {
     expect(edited.redactionContext).toEqual(redactionContext);
   });
 
-  it("preserves the preview but clears identity tokens after analysis cancellation", () => {
-    // Break caught: cancellation must not retain identity metadata while the edited preview is restored.
+  it("preserves the preview and its redaction context after analysis cancellation", () => {
+    // Break caught: retrying a retained preview without its recognized identity token could leak a pasted name.
     const populated = { draft, redactionContext };
 
-    expect(analysisSessionReducer(populated, { type: "ANALYSIS_CANCELLED" })).toEqual({ draft });
+    expect(analysisSessionReducer(populated, { type: "ANALYSIS_CANCELLED" })).toEqual(populated);
   });
 });

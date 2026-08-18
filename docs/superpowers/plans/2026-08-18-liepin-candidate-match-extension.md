@@ -4,11 +4,19 @@
 
 **Goal:** Build an installable Chrome 116+ Manifest V3 MVP that lets a recruiter configure jobs, extract and edit the current Liepin candidate profile, and receive a structured DeepSeek-backed match analysis without persisting candidate data.
 
-**Architecture:** The extension separates the Liepin content script, Chrome service worker, React side panel, pure matching domain, model-provider adapters, and storage repositories. The MVP uses `chrome.storage` and a direct DeepSeek adapter behind interfaces that can later be replaced by company backends without changing extraction, scoring, or UI contracts.
+**Architecture:** The extension separates the Liepin content script, Chrome service worker, React side panel, pure matching domain, model-provider adapters, and storage repositories. The MVP uses extension-origin IndexedDB for persistent settings, `chrome.storage.session` for session-only provider settings, and a direct DeepSeek adapter behind interfaces that can later be replaced by company backends without changing extraction, scoring, or UI contracts.
 
 **Tech Stack:** TypeScript, React, Vite, esbuild, Chrome Manifest V3 APIs, Zod, Vitest, Testing Library, jsdom, npm.
 
 **Spec:** `docs/superpowers/specs/2026-08-18-liepin-candidate-match-extension-design.md`
+
+> **Superseding implementation note (2026-08-18):** The original plan used
+> `chrome.storage.local` for persistent jobs and remembered provider settings. Final
+> security review replaced that medium with extension-origin IndexedDB. The original
+> task history remains recognizable below, but every active storage instruction is
+> superseded as follows: jobs, `activeJobId`, and remembered provider settings use
+> IndexedDB; session-only settings use `chrome.storage.session`; `chrome.storage.local`
+> is read only for atomic, idempotent legacy migration and then cleaned.
 
 ## Global Constraints
 
@@ -17,7 +25,7 @@
 - Multiple jobs may be stored, but exactly zero or one job is active at a time.
 - Only a user-opened single Liepin candidate detail page is analyzed; no batch processing, auto-navigation, hidden-content clicks, or background monitoring.
 - The MVP has one built-in provider, DeepSeek, behind a provider registry; expose DeepSeek V4 Flash and V4 Pro model choices and default to `deepseek-v4-pro` for analysis quality.
-- API keys default to `chrome.storage.session`; persistent `chrome.storage.local` use requires an explicit “remember this device” choice.
+- API keys default to `chrome.storage.session`; an explicit “remember this device” choice stores provider settings in extension-origin IndexedDB.
 - Candidate drafts and analysis results never enter persistent storage, sync storage, IndexedDB, logs, telemetry, or analytics.
 - Remove direct contact identifiers and replace the candidate name before model submission; never send the Liepin URL or candidate ID.
 - Unknown candidate information is not a mismatch. Every match or mismatch must carry job-side and candidate-side evidence.
@@ -69,7 +77,9 @@
 │   │       └── prompt.ts                 evidence-bound Chinese analysis prompt
 │   ├── repositories/
 │   │   ├── chrome-job-repository.ts      local job persistence
-│   │   ├── chrome-provider-settings.ts   session/local API-key persistence
+│   │   ├── chrome-provider-settings.ts   session/IndexedDB API-key persistence
+│   │   ├── indexeddb-storage-area.ts     extension-origin persistent storage
+│   │   ├── migrating-persistent-storage.ts atomic legacy-local migration
 │   │   └── storage-area.ts               Chrome storage test seam
 │   ├── shared/
 │   │   ├── contracts/
@@ -393,6 +403,11 @@ git commit -m "feat: define extension runtime contracts"
 
 ### Task 3: Job and Provider Settings Persistence
 
+> **Superseded storage detail:** this task originally treated the first repository
+> argument as `chrome.storage.local`. The implemented repository seam is unchanged,
+> but that argument is now extension-origin IndexedDB; only the second, session
+> argument is a Chrome Storage area.
+
 **Files:**
 - Create: `src/domain/jobs/job-repository.ts`
 - Create: `src/domain/jobs/job-service.ts`
@@ -426,10 +441,10 @@ The settings test must prove default session storage and explicit persistent sto
 
 ```ts
 it("keeps the key in session unless rememberDevice is true", async () => {
-  const repo = new ChromeProviderSettingsRepository(local, session);
+  const repo = new ChromeProviderSettingsRepository(persistent, session);
   await repo.save(settings, false);
   expect((await session.get("providerSettings")).providerSettings.apiKey).toBe("sk-test");
-  expect((await local.get("providerSettings")).providerSettings).toBeUndefined();
+  expect((await persistent.get("providerSettings")).providerSettings).toBeUndefined();
 });
 ```
 
@@ -453,7 +468,7 @@ export interface StorageAreaLike {
 
 `JobRepository` exposes `list()`, `getActive()`, `saveAndActivate(job)`, and `activate(id)`. `JobService.createAndActivate(input)` trims fields, rejects blanks through `jobSchema`, creates an ID with `crypto.randomUUID()`, writes ISO timestamps, and delegates to the repository.
 
-`ChromeProviderSettingsRepository.save(settings, rememberDevice)` removes the stale copy from the other storage area. `load()` checks session first and local second. `clear()` removes both copies.
+`ChromeProviderSettingsRepository.save(settings, rememberDevice)` removes the stale copy from the other storage area. `load()` checks session first and extension-origin IndexedDB second. `clear()` removes both copies. `MigratingPersistentStorageArea` may read the three legacy keys from `chrome.storage.local`, but its IndexedDB adapter must atomically write only absent values and an idempotent migration marker before legacy cleanup; independent side-panel/service-worker migrators must never overwrite a newer value.
 
 - [ ] **Step 4: Run persistence tests**
 
@@ -678,7 +693,7 @@ git commit -m "feat: extract editable Liepin candidate drafts"
 
 **Interfaces:**
 - Consumes: runtime contracts from Task 2 and the content responder from Task 5.
-- Produces: `createBackgroundController(deps)` and Chrome registrations for side-panel opening, trusted storage access, extraction relay, and page-context change events.
+- Produces: `createBackgroundController(deps)` and Chrome registrations for side-panel opening, extension-origin persistence, trusted session storage, extraction relay, and page-context change events.
 
 - [ ] **Step 1: Write failing controller tests**
 
@@ -718,10 +733,15 @@ Expected: FAIL because the controller does not exist.
 `service-worker.ts` must:
 
 ```ts
+const persistentStorage = new MigratingPersistentStorageArea(
+  new IndexedDbStorageArea(globalThis.indexedDB),
+  chrome.storage.local // legacy migration source only
+);
+
 chrome.runtime.onInstalled.addListener(async () => {
   await chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
-  await chrome.storage.local.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" });
   await chrome.storage.session.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" });
+  await persistentStorage.get([]); // idempotent legacy cleanup
 });
 ```
 
@@ -1127,7 +1147,7 @@ Expected: FAIL until the final wiring and assertions are complete.
 7. Verify every result section and evidence display.
 8. Simulate invalid key and retry from preserved preview.
 9. Switch jobs and confirm the prior candidate/result disappear.
-10. Inspect `chrome.storage.local` and confirm it contains jobs/settings only.
+10. Inspect key names only: extension-origin IndexedDB contains jobs/current-job and optional remembered provider settings; `chrome.storage.local` contains none of the three migrated legacy keys.
 11. Restart Chrome and confirm a session-only key is gone.
 12. Opt into remember-device, restart, and confirm only the provider setting persists.
 

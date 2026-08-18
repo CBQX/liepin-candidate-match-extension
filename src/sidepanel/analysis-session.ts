@@ -46,7 +46,9 @@ export function analysisSessionReducer(
     case "RESULT_LOADED":
       return { ...state, result: action.result };
     case "ANALYSIS_CANCELLED":
-      return state.draft ? { draft: state.draft } : analysisSessionInitialState;
+      return state.draft
+        ? { draft: state.draft, redactionContext: state.redactionContext }
+        : analysisSessionInitialState;
     case "JOB_CHANGED":
     case "PAGE_CHANGED":
     case "SESSION_ENDED":

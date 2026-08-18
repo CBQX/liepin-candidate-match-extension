@@ -1,13 +1,18 @@
 import type { StorageAreaLike } from "./storage-area";
 
 const LEGACY_LOCAL_KEYS = ["jobs", "activeJobId", "providerSettings"] as const;
+const LEGACY_LOCAL_MIGRATION_MARKER = "chrome-storage-local-v1";
+
+export interface AtomicMigrationStorageArea extends StorageAreaLike {
+  migrateLegacyValues(items: Record<string, unknown>, markerKey: string): Promise<void>;
+}
 
 /** Moves pre-IndexedDB releases out of chrome.storage.local without logging values. */
 export class MigratingPersistentStorageArea implements StorageAreaLike {
   private migration?: Promise<void>;
 
   constructor(
-    private readonly persistent: StorageAreaLike,
+    private readonly persistent: AtomicMigrationStorageArea,
     private readonly legacyLocal: StorageAreaLike
   ) {}
 
@@ -27,24 +32,25 @@ export class MigratingPersistentStorageArea implements StorageAreaLike {
   }
 
   private ensureMigrated(): Promise<void> {
-    this.migration ??= this.migrateLegacyLocalState();
+    this.migration ??= this.migrateLegacyLocalState().catch((error: unknown) => {
+      this.migration = undefined;
+      throw error;
+    });
     return this.migration;
   }
 
   private async migrateLegacyLocalState(): Promise<void> {
-    const [legacyValues, persistentValues] = await Promise.all([
-      this.legacyLocal.get([...LEGACY_LOCAL_KEYS]),
-      this.persistent.get([...LEGACY_LOCAL_KEYS])
-    ]);
+    const legacyValues = await this.legacyLocal.get([...LEGACY_LOCAL_KEYS]);
     const valuesToMigrate = Object.fromEntries(LEGACY_LOCAL_KEYS.flatMap((key) =>
-      persistentValues[key] === undefined && legacyValues[key] !== undefined
+      legacyValues[key] !== undefined
         ? [[key, legacyValues[key]]]
         : []
     ));
 
-    if (Object.keys(valuesToMigrate).length > 0) {
-      await this.persistent.set(valuesToMigrate);
-    }
+    await this.persistent.migrateLegacyValues(
+      valuesToMigrate,
+      LEGACY_LOCAL_MIGRATION_MARKER
+    );
     await this.legacyLocal.remove([...LEGACY_LOCAL_KEYS]);
   }
 }
