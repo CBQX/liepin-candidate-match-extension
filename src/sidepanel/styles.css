@@ -219,6 +219,54 @@ select:disabled {
   width: 100%;
 }
 
+.candidate-preview,
+.candidate-sections {
+  display: grid;
+  gap: 14px;
+}
+
+.candidate-section {
+  display: grid;
+  gap: 7px;
+}
+
+.candidate-section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: #364039;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.extraction-status {
+  border-radius: 999px;
+  padding: 3px 8px;
+  background: #e7f1e4;
+  color: #337044;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.extraction-status-possibly_incomplete,
+.extraction-status-missing {
+  background: #fff3d9;
+  color: #845e0a;
+}
+
+.consent-disclosure {
+  margin: 2px 0 -5px;
+  color: #59645c;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.candidate-preview .primary-button,
+.error-card .primary-button {
+  width: 100%;
+}
+
 .loading-state {
   margin: 20px 0;
   text-align: center;

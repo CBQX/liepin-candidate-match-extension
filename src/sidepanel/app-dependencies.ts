@@ -4,7 +4,11 @@ import {
   ChromeProviderSettingsRepository,
   type ProviderSettings
 } from "../repositories/chrome-provider-settings";
-import type { RuntimeResponse } from "../shared/contracts/messages";
+import type { CandidateDraft } from "../shared/contracts/candidate";
+import {
+  pageContextChangedEventSchema,
+  type RuntimeResponse
+} from "../shared/contracts/messages";
 
 export interface ProviderSettingsRepository {
   load(): Promise<ProviderSettings | undefined>;
@@ -16,7 +20,8 @@ export interface SidePanelDependencies {
   providerSettings: ProviderSettingsRepository;
   jobs: JobRepository;
   validateProvider(): Promise<RuntimeResponse<{ valid: true }>>;
-  extractCurrentCandidate(): Promise<RuntimeResponse>;
+  extractCurrentCandidate(): Promise<RuntimeResponse<CandidateDraft>>;
+  subscribeToPageContextChanges(listener: () => void): () => void;
 }
 
 const providerSettings = new ChromeProviderSettingsRepository(
@@ -32,5 +37,13 @@ export const appDependencies: SidePanelDependencies = {
   },
   extractCurrentCandidate() {
     return chrome.runtime.sendMessage({ type: "EXTRACT_CURRENT_CANDIDATE" });
+  },
+  subscribeToPageContextChanges(listener) {
+    const runtimeListener = (message: unknown) => {
+      if (pageContextChangedEventSchema.safeParse(message).success) listener();
+      return undefined;
+    };
+    chrome.runtime.onMessage.addListener(runtimeListener);
+    return () => chrome.runtime.onMessage.removeListener(runtimeListener);
   }
 };

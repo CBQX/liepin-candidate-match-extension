@@ -1,8 +1,17 @@
-import { useEffect, useState } from "react";
+import { useEffect, useReducer, useState } from "react";
 import { JobService, type CreateJobInput } from "../domain/jobs/job-service";
 import type { ProviderSettings } from "../repositories/chrome-provider-settings";
+import { candidateDraftSchema } from "../shared/contracts/candidate";
 import type { Job } from "../shared/contracts/job";
+import type { AppError } from "../shared/errors";
+import { redactCandidateDraft } from "../shared/privacy";
+import {
+  analysisSessionInitialState,
+  analysisSessionReducer
+} from "./analysis-session";
 import type { SidePanelDependencies } from "./app-dependencies";
+import { CandidatePreview } from "./components/CandidatePreview";
+import { ErrorState } from "./components/ErrorState";
 import { JobForm } from "./components/JobForm";
 import { JobSelector } from "./components/JobSelector";
 import { ModelSettingsForm } from "./components/ModelSettingsForm";
@@ -22,6 +31,11 @@ export function App({ deps }: AppProps) {
   const [switchingJob, setSwitchingJob] = useState(false);
   const [switchError, setSwitchError] = useState("");
   const [loadError, setLoadError] = useState("");
+  const [extractionError, setExtractionError] = useState<AppError>();
+  const [analysisSession, dispatchAnalysisSession] = useReducer(
+    analysisSessionReducer,
+    analysisSessionInitialState
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -46,6 +60,24 @@ export function App({ deps }: AppProps) {
     };
   }, [deps]);
 
+  useEffect(() => {
+    const clearForPageChange = () => {
+      setExtractionError(undefined);
+      dispatchAnalysisSession({ type: "PAGE_CHANGED" });
+    };
+    const endSession = () => {
+      setExtractionError(undefined);
+      dispatchAnalysisSession({ type: "SESSION_ENDED" });
+    };
+    const unsubscribe = deps.subscribeToPageContextChanges(clearForPageChange);
+    window.addEventListener("beforeunload", endSession);
+
+    return () => {
+      unsubscribe();
+      window.removeEventListener("beforeunload", endSession);
+    };
+  }, [deps]);
+
   async function saveModelSettings(settings: ProviderSettings, rememberDevice: boolean) {
     try {
       // Validation runs in the service worker, which intentionally reads the stored settings.
@@ -65,6 +97,8 @@ export function App({ deps }: AppProps) {
 
   async function saveJob(input: CreateJobInput) {
     try {
+      dispatchAnalysisSession({ type: "JOB_CHANGED" });
+      setExtractionError(undefined);
       const savedJob = await new JobService(deps.jobs).createAndActivate(input);
       setJobs(await deps.jobs.list());
       setActiveJob(savedJob);
@@ -81,6 +115,8 @@ export function App({ deps }: AppProps) {
     if (!selectedJob) return;
     setSwitchError("");
     setSwitchingJob(true);
+    dispatchAnalysisSession({ type: "JOB_CHANGED" });
+    setExtractionError(undefined);
     try {
       await deps.jobs.activate(id);
       setActiveJob(selectedJob);
@@ -94,11 +130,34 @@ export function App({ deps }: AppProps) {
   }
 
   async function matchAnalysis() {
+    setExtractionError(undefined);
     try {
       const response = await deps.extractCurrentCandidate();
-      return response.ok ? undefined : response.error.message;
+      if (!response.ok) {
+        setExtractionError(response.error);
+        return undefined;
+      }
+
+      const parsedDraft = candidateDraftSchema.safeParse(response.data);
+      if (!parsedDraft.success) {
+        setExtractionError({
+          code: "EXTRACTION_FAILED",
+          message: "候选人信息格式无效，请重试。"
+        });
+        return undefined;
+      }
+
+      dispatchAnalysisSession({
+        type: "DRAFT_LOADED",
+        draft: redactCandidateDraft(parsedDraft.data)
+      });
+      return undefined;
     } catch {
-      return "候选人信息读取失败，请重试。";
+      setExtractionError({
+        code: "EXTRACTION_FAILED",
+        message: "候选人信息读取失败，请重试。"
+      });
+      return undefined;
     }
   }
 
@@ -132,7 +191,21 @@ export function App({ deps }: AppProps) {
         <JobForm onSave={saveJob} />
       )}
       {!loadError && setupState === "ready" && !addingJob && activeJob && (
-        <ReadyState activeJob={activeJob} onMatchAnalysis={matchAnalysis} />
+        analysisSession.draft ? (
+          <CandidatePreview
+            draft={analysisSession.draft}
+            onChange={(section, text) => dispatchAnalysisSession({
+              type: "DRAFT_EDITED",
+              section,
+              text
+            })}
+            onConfirm={() => undefined}
+          />
+        ) : extractionError ? (
+          <ErrorState error={extractionError} onRetry={() => void matchAnalysis()} />
+        ) : (
+          <ReadyState activeJob={activeJob} onMatchAnalysis={matchAnalysis} />
+        )
       )}
     </main>
   );

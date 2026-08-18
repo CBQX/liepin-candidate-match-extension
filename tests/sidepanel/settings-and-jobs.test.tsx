@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "../../src/sidepanel/App";
 import type { SidePanelDependencies } from "../../src/sidepanel/app-dependencies";
+import type { CandidateDraft } from "../../src/shared/contracts/candidate";
 import type { Job } from "../../src/shared/contracts/job";
 import type { ProviderSettings } from "../../src/repositories/chrome-provider-settings";
 
@@ -30,6 +31,16 @@ const jobB: Job = {
   ...jobA,
   id: "job-b",
   company: "乙公司"
+};
+
+const candidateDraft: CandidateDraft = {
+  basics: { text: "候选人", status: "complete" },
+  workExperience: { text: "甲公司产品经理", status: "complete" },
+  projects: { text: "", status: "missing" },
+  education: { text: "本科", status: "complete" },
+  skills: { text: "SaaS", status: "complete" },
+  other: { text: "", status: "missing" },
+  extractionConfidence: "medium"
 };
 
 function createFakeDependencies(initial: {
@@ -65,16 +76,16 @@ function createFakeDependencies(initial: {
     ok: true as const,
     data: { valid: true as const }
   }));
-  const extractCurrentCandidate = vi.fn(async () => ({
-    ok: true as const,
-    data: {}
-  }));
+  const extractCurrentCandidate = vi.fn<SidePanelDependencies["extractCurrentCandidate"]>(
+    async () => ({ ok: true as const, data: candidateDraft })
+  );
 
   return {
     providerSettings,
     jobs: jobRepository,
     validateProvider,
-    extractCurrentCandidate
+    extractCurrentCandidate,
+    subscribeToPageContextChanges: vi.fn(() => () => undefined)
   } satisfies SidePanelDependencies;
 }
 
