@@ -21,7 +21,7 @@ describe("candidate redaction", () => {
   it("removes direct identifiers without removing employment evidence", () => {
     // Break caught: direct identity/contact data could be sent to the model, or broad redaction could erase job evidence.
     const redacted = redactCandidateDraft(candidateDraftWith(
-      "张三，手机 13812345678，邮箱 zhangsan@example.com，微信 zhangsan88，曾任甲公司产品经理"
+      "姓名：张三，手机 13812345678，邮箱 zhangsan@example.com，微信 zhangsan88，曾任甲公司产品经理"
     ));
     const text = [
       redacted.basics,
@@ -110,12 +110,49 @@ describe("candidate redaction", () => {
     expect(redacted.other.text).toBe("可联系 [已移除]");
   });
 
-  it("still recognizes a conservative unlabeled personal-name format", () => {
-    // Break caught: eliminating unsafe inference entirely would regress a common basics row whose name precedes a labeled contact field.
-    const redacted = redactCandidateDraft(candidateDraftWith("张三，手机 13812345678，现居上海"));
+  it("recognizes an unlabeled name only from an unambiguous self-identification phrase", () => {
+    // Break caught: eliminating all inference would miss a name in strong person-specific context, while bare leading tokens remain ambiguous.
+    const redacted = redactCandidateDraft(candidateDraftWith("本人名叫张三，手机 13812345678，现居上海"));
 
     expect(redacted.basics.text).toContain("候选人");
     expect(redacted.basics.text).not.toContain("张三");
     expect(redacted.basics.text).toContain("现居上海");
+  });
+
+  it.each(["沈阳", "徐州", "江门", "金华", "马鞍山", "黄山"])(
+    "preserves ambiguous leading location %s and its employment evidence",
+    (location) => {
+      // Break caught: surname-shaped locations must not be guessed as names and erased globally.
+      const draft = candidateDraftWith(`${location}，手机 13812345678`);
+      draft.workExperience.text = `曾在${location}负责区域招聘业务`;
+
+      const redacted = redactCandidateDraft(draft);
+
+      expect(redacted.basics.text).toContain(location);
+      expect(redacted.workExperience.text).toContain(`曾在${location}负责区域招聘业务`);
+    }
+  );
+
+  it("preserves an ambiguous leading employer brand and all employment evidence", () => {
+    // Break caught: a brand that resembles a personal name must not trigger global evidence deletion.
+    const draft = candidateDraftWith("李宁，手机 13812345678");
+    draft.workExperience.text = "曾负责李宁零售业务与渠道增长";
+
+    const redacted = redactCandidateDraft(draft);
+
+    expect(redacted.basics.text).toContain("李宁");
+    expect(redacted.workExperience.text).toBe("曾负责李宁零售业务与渠道增长");
+  });
+
+  it("accepts the privacy false-negative tradeoff for an ambiguous bare leading token", () => {
+    // Break caught: lexical surname guessing would still erase an ambiguous token without genuine identity evidence.
+    const draft = candidateDraftWith("张三，手机 13812345678");
+    draft.workExperience.text = "张三品牌项目负责人";
+
+    const redacted = redactCandidateDraft(draft);
+
+    expect(redacted.basics.text).toContain("张三");
+    expect(redacted.workExperience.text).toBe("张三品牌项目负责人");
+    expect(redacted.basics.text).not.toContain("13812345678");
   });
 });
