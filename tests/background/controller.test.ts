@@ -50,7 +50,12 @@ describe("background controller", () => {
     "https://www.liepin.com/candidate/",
     "https://www.liepin.com/candidate/search",
     "https://www.liepin.com/candidate/list",
-    "https://www.liepin.com/candidate/fixture"
+    "https://www.liepin.com/candidate/fixture",
+    "https://h.liepin.com/resume/showresumedetail/",
+    "https://h.liepin.com/resume/showresumedetail/?res_id_encode=fixture",
+    "https://h.liepin.com/resume/showresumedetail/?res_id_encode=cv_8F4p0Lm2Q7x9&res_id_encode=cv_8F4p0Lm2Q7x9",
+    "https://h.liepin.com/resume/search?res_id_encode=cv_8F4p0Lm2Q7x9",
+    "https://www.liepin.com/resume/showresumedetail/?res_id_encode=cv_8F4p0Lm2Q7x9"
   ])("rejects non-detail Liepin page %s before messaging content", async (url) => {
     // Break caught: a host-only guard could scrape search, company, job, home,
     // or candidate-list content through the visible-body fallback.
@@ -82,7 +87,8 @@ describe("background controller", () => {
 
   it.each([
     "https://www.liepin.com/candidate/123456789",
-    "https://www.liepin.com/candidate/cv_8F4p0Lm2Q7x9/?from=reviewed-test"
+    "https://www.liepin.com/candidate/cv_8F4p0Lm2Q7x9/?from=reviewed-test",
+    "https://h.liepin.com/resume/showresumedetail/?res_id_encode=cv_8F4p0Lm2Q7x9&index=8"
   ])("relays extraction for reviewed candidate-detail route %s", async (url) => {
     // Break caught: an over-tight page guard could reject the reviewed detail
     // route when it carries a trailing slash or harmless query parameters.

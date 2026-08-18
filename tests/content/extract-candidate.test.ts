@@ -66,7 +66,12 @@ describe("Liepin candidate extraction", () => {
     "https://www.liepin.com/candidate/",
     "https://www.liepin.com/candidate/search",
     "https://www.liepin.com/candidate/list",
-    "https://www.liepin.com/candidate/fixture"
+    "https://www.liepin.com/candidate/fixture",
+    "https://h.liepin.com/resume/showresumedetail/",
+    "https://h.liepin.com/resume/showresumedetail/?res_id_encode=fixture",
+    "https://h.liepin.com/resume/showresumedetail/?res_id_encode=cv_8F4p0Lm2Q7x9&res_id_encode=cv_8F4p0Lm2Q7x9",
+    "https://h.liepin.com/resume/search?res_id_encode=cv_8F4p0Lm2Q7x9",
+    "https://www.liepin.com/resume/showresumedetail/?res_id_encode=cv_8F4p0Lm2Q7x9"
   ])("rejects non-detail Liepin page %s without visible-body fallback", (url) => {
     // Break caught: accepting any Liepin host would turn search/list/home/company
     // or job-page body text into a candidate draft.
@@ -78,7 +83,8 @@ describe("Liepin candidate extraction", () => {
 
   it.each([
     "https://www.liepin.com/candidate/123456789",
-    "https://www.liepin.com/candidate/cv_8F4p0Lm2Q7x9/?from=reviewed-test"
+    "https://www.liepin.com/candidate/cv_8F4p0Lm2Q7x9/?from=reviewed-test",
+    "https://h.liepin.com/resume/showresumedetail/?res_id_encode=cv_8F4p0Lm2Q7x9&index=8"
   ])("supports reviewed candidate-detail route %s", async (url) => {
     // Break caught: the shared eligibility predicate could reject the already
     // reviewed fixture route after centralization.
