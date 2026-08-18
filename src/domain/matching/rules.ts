@@ -25,15 +25,24 @@ const isSupportedYearsCriterion = (text: string): boolean => new RegExp(
   "u"
 ).test(text.trim());
 
-const isSupportedLocationCriterion = (text: string): boolean => {
-  const normalized = text.trim();
-  const hasUnsupportedClause = /(?:且|并且|同时|以及|和)\s*(?:接受|可|可以|能够|愿意|需|需要|有)/u
-    .test(normalized);
-
-  return !hasUnsupportedClause && new RegExp(
-    String.raw`^${REQUIREMENT_PREFIX}(?:工作地点|办公地点|常驻地|所在地)\s*[:：]?\s*[^\s,，;；。|/]{2,20}$`,
+const parseSupportedLocation = (text: string): string | undefined => {
+  const match = text.trim().match(new RegExp(
+    String.raw`^${REQUIREMENT_PREFIX}(?:工作地点|办公地点|常驻地|所在地)\s*[:：]?\s*([^\s,，;；。|/]{2,20})$`,
     "u"
-  ).test(normalized);
+  ));
+  const location = match?.[1];
+  if (!location) return undefined;
+
+  const hasInternalClauseConnector = /.+(?:且|并|以及|同时|与|或).+/u.test(location);
+  const hasMultipleLocationsJoinedByHe = /^.{2,}和.{2,}$/u.test(location);
+  const hasMobilityOrAvailabilityClause = /接受|愿意|需要|要求|出差|差旅|搬迁|迁居|调动|远程|居家|到岗|入职|驻场|异地|办公方式|办公模式/u
+    .test(location);
+
+  return hasInternalClauseConnector
+    || hasMultipleLocationsJoinedByHe
+    || hasMobilityOrAvailabilityClause
+    ? undefined
+    : location;
 };
 
 const isSupportedTokenCriterion = (text: string, tokenPattern: RegExp): boolean => new RegExp(
@@ -54,11 +63,6 @@ const requiredYears = (text: string): number | undefined => {
   if (!/经验/u.test(text)) return undefined;
   const match = text.match(/(\d+(?:\.\d+)?)\s*年/u);
   return match ? Number(match[1]) : undefined;
-};
-
-const requiredLocation = (text: string): string | undefined => {
-  const match = text.match(/(?:工作地点|办公地点|常驻地|所在地)\s*[:：]?\s*([^\s,，;；。|/]{2,20})/u);
-  return match?.[1]?.trim();
 };
 
 const requiredToken = (text: string) =>
@@ -92,9 +96,7 @@ const evaluateCriterion = (criterion: JobCriterion, facts: ObjectiveFacts): Rule
     );
   }
 
-  const location = isSupportedLocationCriterion(criterion.text)
-    ? requiredLocation(criterion.text)
-    : undefined;
+  const location = parseSupportedLocation(criterion.text);
   if (location) {
     const locations = facts.locations ?? new Set<string>();
     if (locations.size === 0) return evaluation(criterion.id, "unknown");

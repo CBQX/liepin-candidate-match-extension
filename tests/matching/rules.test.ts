@@ -99,6 +99,21 @@ describe("evaluateObjectiveRules", () => {
     expect(result).toEqual({ criterionId: "c1", status: "unknown", evidence: [] });
   });
 
+  it.each([
+    "工作地点：上海且能接受出差",
+    "工作地点：上海并接受出差",
+    "工作地点：上海且须接受出差",
+    "工作地点：上海和北京"
+  ])("keeps additional location or mobility clause unknown: %s", (text) => {
+    const locationValue = text.slice("工作地点：".length);
+    const [result] = evaluateObjectiveRules(
+      [criterion(text)],
+      { tokens: new Set(), locations: new Set([locationValue]) }
+    );
+
+    expect(result).toEqual({ criterionId: "c1", status: "unknown", evidence: [] });
+  });
+
   it("does not infer availability from a different visible current location", () => {
     const [result] = evaluateObjectiveRules(
       [criterion("工作地点：上海")],
