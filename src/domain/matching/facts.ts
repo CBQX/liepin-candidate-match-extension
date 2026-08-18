@@ -77,12 +77,29 @@ type CandidateTextSection = keyof typeof sectionLabels;
 const nonCandidateOwnershipContext = /客户|学员|团队|成员|员工|同事|下属|供应商|合作方|公司|企业|部门|岗位要求|培训|课程|项目(?:周期)?/u;
 const explicitCandidateReference = /本人|候选人/u;
 
-const hasUnsupportedExperienceBound = (fragment: string): boolean =>
-  /(?:不到|不足|(?<!不)少于|(?<!不)低于|最多|至多|不超过|不多于|未满|仅有|只有|约|大约|近)\s*\d+(?:\.\d+)?\s*年/u
-    .test(fragment)
-  || /\d+(?:\.\d+)?\s*(?:年\s*)?(?:[-－–—~～至到])\s*\d+(?:\.\d+)?\s*年/u
-    .test(fragment)
-  || /\d+(?:\.\d+)?\s*年\s*(?:以下|以内|内|左右|上下|封顶)/u.test(fragment);
+const candidateClauses = (text: string): string[] =>
+  text.split(/[。；;\n]/u).map((clause) => clause.trim()).filter(Boolean);
+
+type ExperienceClauseClassification = "clear" | "qualified";
+
+const classifyExperienceClause = (clause: string): ExperienceClauseClassification => {
+  const compact = clause.replace(/\s+/gu, "");
+  const hasYears = /\d+(?:\.\d+)?年/u.test(compact);
+  if (!hasYears) return "qualified";
+
+  if (/\d+(?:\.\d+)?(?:年)?(?:[-－–—~～至到])\d+(?:\.\d+)?年/u.test(compact)) {
+    return "qualified";
+  }
+  if (/\d+(?:\.\d+)?年(?:以下|以内|内|左右|上下|封顶)/u.test(compact)) {
+    return "qualified";
+  }
+
+  const withoutClearLowerBounds = compact.replace(/不少于|不低于/gu, "");
+  return /不到|不足|不满|少于|低于|最多|至多|不超过|不多于|未满|仅有|只有|约|大约|近|上限/u
+    .test(withoutClearLowerBounds)
+    ? "qualified"
+    : "clear";
+};
 
 const findYearsExperience = (
   draft: CandidateDraft
@@ -95,20 +112,19 @@ const findYearsExperience = (
   ];
 
   (["basics", "workExperience"] as const).forEach((section) => {
-    const fragments = draft[section].text.split(/[。；;\n]/u).map((fragment) => fragment.trim());
-    for (const fragment of fragments) {
-      if (hasUnsupportedExperienceBound(fragment)) continue;
-      const hasNonCandidateContext = nonCandidateOwnershipContext.test(fragment);
-      const candidateIsExplicit = explicitCandidateReference.test(fragment)
-        || /^(?:工作|从业)经验\s*[:：]/u.test(fragment);
+    for (const clause of candidateClauses(draft[section].text)) {
+      if (classifyExperienceClause(clause) !== "clear") continue;
+      const hasNonCandidateContext = nonCandidateOwnershipContext.test(clause);
+      const candidateIsExplicit = explicitCandidateReference.test(clause)
+        || /^(?:工作|从业)经验\s*[:：]/u.test(clause);
       if (hasNonCandidateContext && !candidateIsExplicit) continue;
 
       patterns.forEach((pattern) => {
-        for (const match of fragment.matchAll(pattern)) {
+        for (const match of clause.matchAll(pattern)) {
           const value = Number(match[2]);
           const source = match[1]?.trim();
           if (Number.isFinite(value) && source) {
-            values.push({ value, evidence: `${sectionLabels[section]}：${fragment}` });
+            values.push({ value, evidence: `${sectionLabels[section]}：${clause}` });
           }
         }
       });
@@ -116,6 +132,53 @@ const findYearsExperience = (
   });
 
   return values.sort((left, right) => right.value - left.value)[0];
+};
+
+type CredentialClauseClassification = "positive" | "qualified" | "unsupported";
+
+const isObjectiveCredentialItem = (item: string): boolean =>
+  OBJECTIVE_TOKEN_ALIASES.some(([, , tokenPattern]) => new RegExp(
+    String.raw`^(?:${tokenPattern.source})(?:\s*(?:证书|认证|资格|资质))?$`,
+    tokenPattern.flags.replace(/[gy]/gu, "")
+  ).test(item.trim()));
+
+const isGenuinelyListLikeCredentialClause = (clause: string): boolean => {
+  const content = clause
+    .replace(/^\s*(?:[-•·]\s*)?(?:(?:证书|认证|资质|资格|技能)\s*[:：]\s*)?/u, "")
+    .trim();
+  const items = content.split(/[、,，/|｜]+/u).map((item) => item.trim()).filter(Boolean);
+  return items.length > 0 && items.every(isObjectiveCredentialItem);
+};
+
+const classifyCredentialClause = (
+  clause: string,
+  section: CandidateTextSection
+): CredentialClauseClassification => {
+  const deniesPossession = /不具备|(?:尚)?未(?:持有|拥有|具备|取得|获得|通过|考取)|没有|无法|(?:^|[\s，,：:])无(?=\s|[A-Za-z])/u
+    .test(clause);
+  const plansPossession = /计划|准备|打算|拟(?:考|考取|报考|取得|获得|通过|持有)|待(?:考|考取|报考|取得|获得|通过|认证|续期)|备考|报考/u
+    .test(clause);
+  const invalidatesPossession = /过期|失效|作废|注销|吊销|未续期/u.test(clause);
+  if (deniesPossession || plansPossession || invalidatesPossession) return "qualified";
+
+  const explicitPossession = /持有|具备|拥有|通过|获得|取得|考取/u.test(clause);
+  const labeledPossession = /^\s*(?:[-•·]\s*)?(?:证书|认证|资质|资格)\s*[:：]/u.test(clause);
+  const hasNonCandidateContext = nonCandidateOwnershipContext.test(clause);
+  const candidateIsExplicit = explicitCandidateReference.test(clause);
+  if (
+    (explicitPossession || labeledPossession)
+    && (!hasNonCandidateContext || candidateIsExplicit)
+  ) {
+    return "positive";
+  }
+  if (
+    section === "skills"
+    && !hasNonCandidateContext
+    && isGenuinelyListLikeCredentialClause(clause)
+  ) {
+    return "positive";
+  }
+  return "unsupported";
 };
 
 const candidateOwnedTokenEvidence = (
@@ -126,31 +189,11 @@ const candidateOwnedTokenEvidence = (
   const sections = Object.keys(sectionLabels) as CandidateTextSection[];
 
   for (const section of sections) {
-    const fragments = draft[section].text.split(/[。；;\n]/u).map((fragment) => fragment.trim());
-    for (const fragment of fragments) {
-      const match = pattern.exec(fragment);
+    for (const clause of candidateClauses(draft[section].text)) {
+      const match = pattern.exec(clause);
       if (!match) continue;
-
-      const beforeToken = fragment.slice(Math.max(0, match.index - 16), match.index);
-      const afterToken = fragment.slice(match.index + match[0].length, match.index + match[0].length + 16);
-      const negatedOrPlanned = /(?:未通过|尚未通过|未取得|尚未取得|未获得|尚未获得|未考取|尚未考取|未持有|尚未持有|没有|无|计划考取|计划报考|准备考|准备考取|准备报考|正在备考|备考|待考|(?:已)?(?:过期|失效|作废)(?:的)?)\s*$/u
-        .test(beforeToken)
-        || /^\s*(?:未通过|未取得|未获得|未考取|未持有|计划考取|计划报考|准备考|准备考取|准备报考|正在备考|备考|待考)/u
-          .test(afterToken);
-      const expired = /^\s*[，,]?\s*(?:该|此)?\s*(?:证书|认证|资格|资质)?\s*(?:已)?(?:过期|失效|作废|未续期)/u
-        .test(afterToken);
-      if (negatedOrPlanned || expired) continue;
-
-      const explicitPossession = /持有|具备|拥有|通过|获得|考取/u.test(fragment);
-      const labeledPossession = /^\s*(?:[-•·]\s*)?(?:证书|认证|资质|资格)\s*[:：]/u.test(fragment);
-      const hasNonCandidateContext = nonCandidateOwnershipContext.test(fragment);
-      const candidateIsExplicit = explicitCandidateReference.test(fragment);
-      const skillListPossession = section === "skills" && !hasNonCandidateContext;
-      if (
-        ((explicitPossession || labeledPossession) && (!hasNonCandidateContext || candidateIsExplicit))
-        || skillListPossession
-      ) {
-        evidence.push(`${sectionLabels[section]}：${fragment}`);
+      if (classifyCredentialClause(clause, section) === "positive") {
+        evidence.push(`${sectionLabels[section]}：${clause}`);
       }
     }
   }
