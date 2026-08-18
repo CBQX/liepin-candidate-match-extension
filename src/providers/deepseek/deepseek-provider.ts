@@ -1,53 +1,25 @@
-import { appErrorCodeSchema, type AppError, type AppErrorCode } from "../../shared/errors";
+import type { AppErrorCode } from "../../shared/errors";
 import {
   modelMatchResultSchema,
   type ModelMatchResult
 } from "../../shared/contracts/matching";
 import type { ProviderSettings } from "../../repositories/chrome-provider-settings";
-import type { MatchInput, ModelProvider } from "../model-provider";
+import {
+  mapModelProviderError,
+  NormalizedProviderError,
+  type MatchInput,
+  type ModelProvider
+} from "../model-provider";
 import { buildAnalysisPrompt } from "./prompt";
 
 type Fetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
 const API_BASE = "https://api.deepseek.com";
-const TIMEOUT_MS = 60_000;
+const HEADER_TIMEOUT_MS = 25_000;
+const BODY_TIMEOUT_MS = 25_000;
 const REPAIR_INSTRUCTION = "上一次输出为空、被截断或不符合约定协议。请修复错误，并仅返回一个字段完整、可解析且符合协议的完整 JSON 对象。";
 
-const errorMessages: Record<AppErrorCode, string> = {
-  UNSUPPORTED_PAGE: "当前页面不受支持。",
-  EXTRACTION_FAILED: "候选人信息提取失败。",
-  MISSING_API_KEY: "请先配置 DeepSeek API Key。",
-  INVALID_API_KEY: "DeepSeek API Key 无效，请检查后重试。",
-  INVALID_PROVIDER_SETTINGS: "模型供应商或模型配置已失效，请重新配置。",
-  RATE_LIMITED: "DeepSeek 请求过于频繁，请稍后重试。",
-  INSUFFICIENT_BALANCE: "DeepSeek 账户余额不足，请充值后重试。",
-  MODEL_TIMEOUT: "DeepSeek 响应超时，请重试。",
-  INVALID_MODEL_OUTPUT: "模型返回内容无法验证，请重试。",
-  STORAGE_FAILED: "模型设置读取失败。",
-  UNKNOWN: "模型服务暂时不可用，请稍后重试。"
-};
-
-export class ProviderError extends Error {
-  constructor(readonly code: AppErrorCode, message = errorMessages[code]) {
-    super(message);
-    this.name = "ProviderError";
-  }
-}
-
-export function mapProviderError(error: unknown): AppError {
-  if (typeof error === "object" && error !== null && "code" in error) {
-    const parsedCode = appErrorCodeSchema.safeParse((error as { code?: unknown }).code);
-    if (parsedCode.success) {
-      return { code: parsedCode.data, message: errorMessages[parsedCode.data] };
-    }
-  }
-
-  if (error instanceof DOMException && error.name === "AbortError") {
-    return { code: "MODEL_TIMEOUT", message: errorMessages.MODEL_TIMEOUT };
-  }
-
-  return { code: "UNKNOWN", message: errorMessages.UNKNOWN };
-}
+export { mapModelProviderError as mapProviderError };
 
 function errorCodeFromResponse(status: number, payload: unknown): AppErrorCode {
   if (status === 401 || status === 403) return "INVALID_API_KEY";
@@ -67,14 +39,14 @@ function errorCodeFromResponse(status: number, payload: unknown): AppErrorCode {
   return "UNKNOWN";
 }
 
-async function providerErrorFromResponse(response: Response): Promise<ProviderError> {
+async function providerErrorFromResponse(response: Response): Promise<NormalizedProviderError> {
   let payload: unknown;
   try {
     payload = await response.json();
   } catch {
     payload = undefined;
   }
-  return new ProviderError(errorCodeFromResponse(response.status, payload));
+  return new NormalizedProviderError(errorCodeFromResponse(response.status, payload));
 }
 
 function parseCompletion(payload: unknown): ModelMatchResult {
@@ -84,10 +56,10 @@ function parseCompletion(payload: unknown): ModelMatchResult {
   const firstChoice = Array.isArray(choice) ? choice[0] : undefined;
 
   if (typeof firstChoice !== "object" || firstChoice === null) {
-    throw new ProviderError("INVALID_MODEL_OUTPUT");
+    throw new NormalizedProviderError("INVALID_MODEL_OUTPUT");
   }
   if ((firstChoice as { finish_reason?: unknown }).finish_reason === "length") {
-    throw new ProviderError("INVALID_MODEL_OUTPUT");
+    throw new NormalizedProviderError("INVALID_MODEL_OUTPUT");
   }
 
   const message = (firstChoice as { message?: unknown }).message;
@@ -95,19 +67,22 @@ function parseCompletion(payload: unknown): ModelMatchResult {
     ? (message as { content?: unknown }).content
     : undefined;
   if (typeof content !== "string" || content.trim() === "") {
-    throw new ProviderError("INVALID_MODEL_OUTPUT");
+    throw new NormalizedProviderError("INVALID_MODEL_OUTPUT");
   }
 
   try {
     return modelMatchResultSchema.parse(JSON.parse(content));
   } catch {
-    throw new ProviderError("INVALID_MODEL_OUTPUT");
+    throw new NormalizedProviderError("INVALID_MODEL_OUTPUT");
   }
 }
 
 export class DeepSeekProvider implements ModelProvider {
   readonly id = "deepseek" as const;
-  readonly models = ["deepseek-v4-flash", "deepseek-v4-pro"] as const;
+  readonly models = [
+    { id: "deepseek-v4-flash", label: "DeepSeek V4 Flash" },
+    { id: "deepseek-v4-pro", label: "DeepSeek V4 Pro" }
+  ] as const;
 
   constructor(private readonly fetcher: Fetcher = fetch) {}
 
@@ -124,7 +99,11 @@ export class DeepSeekProvider implements ModelProvider {
     });
   }
 
-  async analyze(input: MatchInput, settings: ProviderSettings): Promise<ModelMatchResult> {
+  async analyze(
+    input: MatchInput,
+    settings: ProviderSettings,
+    signal?: AbortSignal
+  ): Promise<ModelMatchResult> {
     this.requireApiKey(settings);
     this.requireSupportedModel(settings);
     const prompt = buildAnalysisPrompt(input);
@@ -157,29 +136,33 @@ export class DeepSeekProvider implements ModelProvider {
           try {
             return await response.json();
           } catch {
-            throw new ProviderError("INVALID_MODEL_OUTPUT");
+            throw new NormalizedProviderError("INVALID_MODEL_OUTPUT");
           }
-        });
+        }, signal);
         return parseCompletion(payload);
       } catch (error) {
-        if (!(error instanceof ProviderError) || error.code !== "INVALID_MODEL_OUTPUT" || attempt === 1) {
+        if (
+          !(error instanceof NormalizedProviderError)
+          || error.code !== "INVALID_MODEL_OUTPUT"
+          || attempt === 1
+        ) {
           throw error;
         }
       }
     }
 
-    throw new ProviderError("INVALID_MODEL_OUTPUT");
+    throw new NormalizedProviderError("INVALID_MODEL_OUTPUT");
   }
 
   private requireApiKey(settings: ProviderSettings): void {
     if (settings.apiKey.trim() === "") {
-      throw new ProviderError("MISSING_API_KEY");
+      throw new NormalizedProviderError("MISSING_API_KEY");
     }
   }
 
   private requireSupportedModel(settings: ProviderSettings): void {
-    if (!this.models.some((model) => model === settings.model)) {
-      throw new ProviderError("INVALID_PROVIDER_SETTINGS");
+    if (!this.models.some((model) => model.id === settings.model)) {
+      throw new NormalizedProviderError("INVALID_PROVIDER_SETTINGS");
     }
   }
 
@@ -193,21 +176,44 @@ export class DeepSeekProvider implements ModelProvider {
   private async fetchWithTimeout<T>(
     url: string,
     init: RequestInit,
-    consume: (response: Response) => Promise<T>
+    consume: (response: Response) => Promise<T>,
+    externalSignal?: AbortSignal
   ): Promise<T> {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS);
+    let abortReason: "timeout" | "cancelled" | undefined;
+    const abortForCancellation = () => {
+      abortReason = "cancelled";
+      controller.abort();
+    };
+    if (externalSignal?.aborted) abortForCancellation();
+    else externalSignal?.addEventListener("abort", abortForCancellation, { once: true });
+
+    if (controller.signal.aborted) {
+      externalSignal?.removeEventListener("abort", abortForCancellation);
+      throw new NormalizedProviderError("ANALYSIS_CANCELLED");
+    }
+
+    const startTimeout = (milliseconds: number) => setTimeout(() => {
+      abortReason ??= "timeout";
+      controller.abort();
+    }, milliseconds);
+    let timeout = startTimeout(HEADER_TIMEOUT_MS);
 
     try {
       const response = await this.fetcher(url, { ...init, signal: controller.signal });
+      clearTimeout(timeout);
+      timeout = startTimeout(BODY_TIMEOUT_MS);
       return await consume(response);
     } catch (error) {
       if (controller.signal.aborted) {
-        throw new ProviderError("MODEL_TIMEOUT");
+        throw new NormalizedProviderError(
+          abortReason === "cancelled" ? "ANALYSIS_CANCELLED" : "MODEL_TIMEOUT"
+        );
       }
       throw error;
     } finally {
       clearTimeout(timeout);
+      externalSignal?.removeEventListener("abort", abortForCancellation);
     }
   }
 }

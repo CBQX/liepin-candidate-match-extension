@@ -1,4 +1,8 @@
-import type { CandidateDraft } from "../../shared/contracts/candidate";
+import { useState } from "react";
+import type {
+  CandidateDraft,
+  CandidateRedactionContext
+} from "../../shared/contracts/candidate";
 
 type CandidateSectionKey = Exclude<keyof CandidateDraft, "extractionConfidence">;
 
@@ -19,11 +23,19 @@ const statusLabels = {
 
 interface CandidatePreviewProps {
   draft: CandidateDraft;
+  identityDetection?: CandidateRedactionContext["identityDetection"];
   onChange(section: CandidateSectionKey, text: string): void;
   onConfirm(): void;
 }
 
-export function CandidatePreview({ draft, onChange, onConfirm }: CandidatePreviewProps) {
+export function CandidatePreview({
+  draft,
+  identityDetection = "undetected",
+  onChange,
+  onConfirm
+}: CandidatePreviewProps) {
+  const [privacyConfirmed, setPrivacyConfirmed] = useState(false);
+
   return (
     <section className="panel-card candidate-preview" aria-labelledby="candidate-preview-title">
       <p className="eyebrow">本次分析 · 临时内容</p>
@@ -41,13 +53,36 @@ export function CandidatePreview({ draft, onChange, onConfirm }: CandidatePrevie
             <textarea
               aria-label={label}
               value={draft[key].text}
-              onChange={(event) => onChange(key, event.target.value)}
+              onChange={(event) => {
+                setPrivacyConfirmed(false);
+                onChange(key, event.target.value);
+              }}
             />
           </label>
         ))}
       </div>
       <p className="consent-disclosure">确认后，以下脱敏内容将发送至 DeepSeek 进行本次分析</p>
-      <button className="primary-button" type="button" onClick={onConfirm}>确认并分析</button>
+      {identityDetection !== "confirmed" && (
+        <p className="privacy-warning" role="note">
+          未能可靠识别候选人姓名，请特别检查预览中是否仍有姓名或其他直接标识。
+        </p>
+      )}
+      <label className="checkbox-row privacy-confirmation">
+        <input
+          type="checkbox"
+          checked={privacyConfirmed}
+          onChange={(event) => setPrivacyConfirmed(event.target.checked)}
+        />
+        我已检查并确认内容中不含候选人姓名、联系方式或猎聘 ID
+      </label>
+      <button
+        className="primary-button"
+        type="button"
+        disabled={!privacyConfirmed}
+        onClick={onConfirm}
+      >
+        确认并分析
+      </button>
     </section>
   );
 }

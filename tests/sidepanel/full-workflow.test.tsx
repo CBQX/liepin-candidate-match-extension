@@ -98,6 +98,7 @@ function createWorkflowDependencies() {
     analyzeCandidate: vi.fn<SidePanelDependencies["analyzeCandidate"]>(
       async () => ({ ok: true as const, data: analysis })
     ),
+    cancelAnalysis: vi.fn(async () => ({ ok: true as const, data: { cancelled: true } })),
     subscribeToPageContextChanges: vi.fn(() => () => undefined)
   } satisfies SidePanelDependencies;
 
@@ -124,6 +125,7 @@ describe("complete recruiter workflow", () => {
       randomUUID: vi.fn()
         .mockReturnValueOnce("job-one")
         .mockReturnValueOnce("job-two")
+        .mockReturnValueOnce("analysis-one")
     });
     const deps = createWorkflowDependencies();
     const user = userEvent.setup();
@@ -155,6 +157,9 @@ describe("complete recruiter workflow", () => {
     const skills = await screen.findByLabelText("技能") as HTMLTextAreaElement;
     expect(deps.analyzeCandidate).not.toHaveBeenCalled();
     fireEvent.change(skills, { target: { value: "SaaS、产品规划、AI 工作流" } });
+    await user.click(screen.getByRole("checkbox", {
+      name: /我已检查.*姓名.*联系方式.*猎聘 ID/u
+    }));
     await user.click(screen.getByRole("button", { name: "确认并分析" }));
 
     expect(await screen.findByRole("heading", { name: "甲公司 · 人选匹配报告" })).toBeTruthy();

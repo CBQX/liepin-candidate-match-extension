@@ -24,3 +24,10 @@ export const candidateDraftSchema = z.object({
 });
 
 export type CandidateDraft = z.infer<typeof candidateDraftSchema>;
+
+export const candidateRedactionContextSchema = z.object({
+  identityTokens: z.array(z.string().trim().min(2).max(32)).max(4),
+  identityDetection: z.enum(["confirmed", "probable", "undetected"])
+});
+
+export type CandidateRedactionContext = z.infer<typeof candidateRedactionContextSchema>;

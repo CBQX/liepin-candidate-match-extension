@@ -71,6 +71,7 @@ function createDependencies() {
       ok: false as const,
       error: { code: "UNKNOWN" as const, message: "测试中未配置分析结果。" }
     })),
+    cancelAnalysis: vi.fn(async () => ({ ok: true as const, data: { cancelled: true } })),
     subscribeToPageContextChanges: vi.fn((listener: () => void) => {
       pageContextListener = listener;
       return () => {
@@ -106,10 +107,37 @@ describe("candidate preview", () => {
     // Break caught: candidate data could be submitted without the required adjacent third-party disclosure.
     render(<CandidatePreview draft={extractedDraft} onChange={vi.fn()} onConfirm={vi.fn()} />);
 
-    const confirm = screen.getByRole("button", { name: "确认并分析" });
-    expect(confirm.previousElementSibling?.textContent).toBe(
-      "确认后，以下脱敏内容将发送至 DeepSeek 进行本次分析"
-    );
+    expect(screen.getByText("确认后，以下脱敏内容将发送至 DeepSeek 进行本次分析"))
+      .toBeTruthy();
+  });
+
+  it("requires an adjacent manual privacy confirmation and resets it after an edit", async () => {
+    // Break caught: uncertain identity extraction or recruiter edits could be submitted without a final human identifier check.
+    const onConfirm = vi.fn();
+    const onChange = vi.fn();
+    const user = userEvent.setup();
+    render(<CandidatePreview
+      draft={extractedDraft}
+      identityDetection="undetected"
+      onChange={onChange}
+      onConfirm={onConfirm}
+    />);
+
+    const confirmation = screen.getByRole("checkbox", {
+      name: /我已检查.*姓名.*联系方式.*猎聘 ID/u
+    });
+    const submit = screen.getByRole("button", { name: "确认并分析" });
+    expect((submit as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText(/未能可靠识别候选人姓名/u)).toBeTruthy();
+
+    await user.click(confirmation);
+    expect((submit as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.change(screen.getByLabelText("技能"), { target: { value: "新粘贴内容" } });
+    expect((submit as HTMLButtonElement).disabled).toBe(true);
+
+    await user.click(confirmation);
+    await user.click(submit);
+    expect(onConfirm).toHaveBeenCalledOnce();
   });
 
   it("redacts extraction before preview and clears it on job, page, and session boundaries", async () => {

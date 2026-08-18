@@ -5,6 +5,7 @@ import { evaluateObjectiveRules } from "../domain/matching/rules";
 import type { ModelProvider } from "../providers/model-provider";
 import type { ProviderSettings } from "../repositories/chrome-provider-settings";
 import type { CandidateDraft } from "../shared/contracts/candidate";
+import type { CandidateRedactionContext } from "../shared/contracts/candidate";
 import type { Job } from "../shared/contracts/job";
 import {
   matchAnalysisSchema,
@@ -16,12 +17,14 @@ import type { AppErrorCode } from "../shared/errors";
 export interface AnalyzeCandidateRequest {
   job: Job;
   candidateDraft: CandidateDraft;
+  redactionContext: CandidateRedactionContext;
 }
 
 export interface AnalyzeCandidateDependencies {
   provider: ModelProvider;
   settings: ProviderSettings | undefined;
-  redact(draft: CandidateDraft): CandidateDraft;
+  redact(draft: CandidateDraft, context: CandidateRedactionContext): CandidateDraft;
+  signal?: AbortSignal;
 }
 
 class AnalysisPipelineError extends Error {
@@ -39,20 +42,21 @@ export async function analyzeCandidate(
     throw new AnalysisPipelineError("MISSING_API_KEY");
   }
 
-  const cleanCandidate = deps.redact(request.candidateDraft);
+  const cleanCandidate = deps.redact(request.candidateDraft, request.redactionContext);
   const criteria = parseJobCriteria(request.job);
   const facts = extractObjectiveFacts(cleanCandidate);
   const ruleEvaluations = evaluateObjectiveRules(criteria, facts);
   const modelResult = await deps.provider.analyze(
     { job: request.job, candidateDraft: cleanCandidate, criteria, ruleEvaluations },
-    deps.settings
+    deps.settings,
+    deps.signal
   );
   try {
     const validatedModelResult = modelMatchResultSchema.parse(modelResult);
     return matchAnalysisSchema.parse(composeAnalysis(
       validatedModelResult,
       ruleEvaluations,
-      cleanCandidate.extractionConfidence
+      cleanCandidate
     ));
   } catch {
     throw new AnalysisPipelineError("INVALID_MODEL_OUTPUT");

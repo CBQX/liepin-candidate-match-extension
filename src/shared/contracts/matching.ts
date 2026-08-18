@@ -57,8 +57,23 @@ export const qualitativeEvidenceSchema = z.object({
 
 export type QualitativeEvidence = z.infer<typeof qualitativeEvidenceSchema>;
 
+const exactDimensionScoresSchema = z.array(dimensionScoreSchema)
+  .length(dimensionIds.length)
+  .superRefine((scores, context) => {
+    const counts = new Map<string, number>();
+    for (const { dimensionId } of scores) {
+      counts.set(dimensionId, (counts.get(dimensionId) ?? 0) + 1);
+    }
+    if (dimensionIds.some((dimensionId) => counts.get(dimensionId) !== 1)) {
+      context.addIssue({
+        code: "custom",
+        message: "Every matching dimension must appear exactly once"
+      });
+    }
+  });
+
 const modelAnalysisSchema = z.object({
-  dimensionScores: z.array(dimensionScoreSchema),
+  dimensionScores: exactDimensionScoresSchema,
   matches: z.array(qualitativeEvidenceSchema),
   mismatches: z.array(qualitativeEvidenceSchema),
   risks: z.array(qualitativeEvidenceSchema),

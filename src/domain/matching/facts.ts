@@ -12,8 +12,10 @@ export type EducationLevel = typeof EDUCATION_LEVELS[number];
 
 export interface ObjectiveFacts {
   tokens: Set<string>;
+  tokenEvidence?: Map<string, string[]>;
   educationLevel?: EducationLevel;
   yearsExperience?: number;
+  yearsExperienceEvidence?: string;
   locations?: Set<string>;
 }
 
@@ -61,21 +63,81 @@ const findEducationLevel = (text: string): EducationLevel | undefined => {
   return highestIndex < 0 ? undefined : EDUCATION_LEVELS[highestIndex];
 };
 
-const findYearsExperience = (text: string): number | undefined => {
-  const values: number[] = [];
+const sectionLabels = {
+  basics: "基本信息",
+  workExperience: "工作经历",
+  projects: "项目经历",
+  education: "教育经历",
+  skills: "技能",
+  other: "其他内容"
+} as const;
+
+type CandidateTextSection = keyof typeof sectionLabels;
+
+const nonCandidateOwnershipContext = /客户|学员|团队|成员|员工|同事|下属|供应商|合作方|公司|企业|部门|岗位要求|培训|课程|项目(?:周期)?/u;
+const explicitCandidateReference = /本人|候选人/u;
+
+const findYearsExperience = (
+  draft: CandidateDraft
+): { value: number; evidence: string } | undefined => {
+  const values: Array<{ value: number; evidence: string }> = [];
   const patterns = [
-    /(\d+(?:\.\d+)?)\s*年(?:以上|及以上)?(?:相关|工作|行业|产品|开发|销售|管理|从业)?经验/gu,
-    /(?:工作|从业)经验\s*[:：]?\s*(\d+(?:\.\d+)?)\s*年/gu
+    /((?:(?:本人|候选人)\s*)?(?:明确|累计|拥有|具备|已有)?\s*(\d+(?:\.\d+)?)\s*年(?:以上|及以上)?(?:相关|工作|行业|产品|开发|销售|管理|从业)?经验)/gu,
+    /((?:工作|从业)经验\s*[:：]\s*(\d+(?:\.\d+)?)\s*年)/gu,
+    /((?:明确|累计|拥有|具备|已有)\s*(\d+(?:\.\d+)?)\s*年(?:以上|及以上)?工作经验)/gu
   ];
 
-  patterns.forEach((pattern) => {
-    for (const match of text.matchAll(pattern)) {
-      const value = Number(match[1]);
-      if (Number.isFinite(value)) values.push(value);
+  (["basics", "workExperience"] as const).forEach((section) => {
+    const fragments = draft[section].text.split(/[。；;\n]/u).map((fragment) => fragment.trim());
+    for (const fragment of fragments) {
+      const hasNonCandidateContext = nonCandidateOwnershipContext.test(fragment);
+      const candidateIsExplicit = explicitCandidateReference.test(fragment)
+        || /^(?:工作|从业)经验\s*[:：]/u.test(fragment);
+      if (hasNonCandidateContext && !candidateIsExplicit) continue;
+
+      patterns.forEach((pattern) => {
+        for (const match of fragment.matchAll(pattern)) {
+          const value = Number(match[2]);
+          const source = match[1]?.trim();
+          if (Number.isFinite(value) && source) {
+            values.push({ value, evidence: `${sectionLabels[section]}：${source}` });
+          }
+        }
+      });
     }
   });
 
-  return values.length === 0 ? undefined : Math.max(...values);
+  return values.sort((left, right) => right.value - left.value)[0];
+};
+
+const candidateOwnedTokenEvidence = (
+  draft: CandidateDraft,
+  pattern: RegExp
+): string[] => {
+  const evidence: string[] = [];
+  const sections = Object.keys(sectionLabels) as CandidateTextSection[];
+
+  for (const section of sections) {
+    const fragments = draft[section].text.split(/[。；;\n]/u).map((fragment) => fragment.trim());
+    for (const fragment of fragments) {
+      const match = pattern.exec(fragment);
+      if (!match) continue;
+
+      const explicitPossession = /持有|具备|拥有|通过|获得|考取/u.test(fragment);
+      const labeledPossession = /^\s*(?:[-•·]\s*)?(?:证书|认证|资质|资格)\s*[:：]/u.test(fragment);
+      const hasNonCandidateContext = nonCandidateOwnershipContext.test(fragment);
+      const candidateIsExplicit = explicitCandidateReference.test(fragment);
+      const skillListPossession = section === "skills" && !hasNonCandidateContext;
+      if (
+        (explicitPossession || labeledPossession || skillListPossession)
+        && (!hasNonCandidateContext || candidateIsExplicit)
+      ) {
+        evidence.push(`${sectionLabels[section]}：${fragment}`);
+      }
+    }
+  }
+
+  return [...new Set(evidence)];
 };
 
 const findLocations = (text: string): Set<string> => {
@@ -91,24 +153,27 @@ const findLocations = (text: string): Set<string> => {
 };
 
 export function extractObjectiveFacts(draft: CandidateDraft): ObjectiveFacts & { locations: Set<string> } {
-  const text = [
-    draft.basics.text,
-    draft.workExperience.text,
-    draft.projects.text,
-    draft.education.text,
-    draft.skills.text,
-    draft.other.text
-  ].join("\n");
-
   const tokens = new Set<string>();
+  const tokenEvidence = new Map<string, string[]>();
   OBJECTIVE_TOKEN_ALIASES.forEach(([token, , pattern]) => {
-    if (pattern.test(text)) tokens.add(token);
+    const evidence = candidateOwnedTokenEvidence(draft, pattern);
+    if (evidence.length > 0) {
+      tokens.add(token);
+      tokenEvidence.set(token, evidence);
+    }
   });
+  const years = findYearsExperience(draft);
+
+  const text = Object.keys(sectionLabels)
+    .map((section) => draft[section as CandidateTextSection].text)
+    .join("\n");
 
   return {
     tokens,
+    tokenEvidence,
     educationLevel: findEducationLevel(draft.education.text),
-    yearsExperience: findYearsExperience(text),
+    yearsExperience: years?.value,
+    yearsExperienceEvidence: years?.evidence,
     locations: findLocations(text)
   };
 }

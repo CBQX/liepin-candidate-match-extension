@@ -4,7 +4,12 @@ import {
   ChromeProviderSettingsRepository,
   type ProviderSettings
 } from "../repositories/chrome-provider-settings";
-import type { CandidateDraft } from "../shared/contracts/candidate";
+import { IndexedDbStorageArea } from "../repositories/indexeddb-storage-area";
+import { MigratingPersistentStorageArea } from "../repositories/migrating-persistent-storage";
+import type {
+  CandidateDraft,
+  CandidateRedactionContext
+} from "../shared/contracts/candidate";
 import type { Job } from "../shared/contracts/job";
 import type { MatchAnalysis } from "../shared/contracts/matching";
 import {
@@ -23,26 +28,42 @@ export interface SidePanelDependencies {
   jobs: JobRepository;
   validateProvider(): Promise<RuntimeResponse<{ valid: true }>>;
   extractCurrentCandidate(): Promise<RuntimeResponse<CandidateDraft>>;
-  analyzeCandidate(job: Job, candidateDraft: CandidateDraft): Promise<RuntimeResponse<MatchAnalysis>>;
+  analyzeCandidate(
+    job: Job,
+    candidateDraft: CandidateDraft,
+    redactionContext: CandidateRedactionContext,
+    requestId: string
+  ): Promise<RuntimeResponse<MatchAnalysis>>;
+  cancelAnalysis(requestId: string): Promise<RuntimeResponse<{ cancelled: boolean }>>;
   subscribeToPageContextChanges(listener: () => void): () => void;
 }
 
-const providerSettings = new ChromeProviderSettingsRepository(
-  chrome.storage.local,
-  chrome.storage.session
+const persistentStorage = new MigratingPersistentStorageArea(
+  new IndexedDbStorageArea(globalThis.indexedDB),
+  chrome.storage.local
 );
+const providerSettings = new ChromeProviderSettingsRepository(persistentStorage, chrome.storage.session);
 
 export const appDependencies: SidePanelDependencies = {
   providerSettings,
-  jobs: new ChromeJobRepository(chrome.storage.local),
+  jobs: new ChromeJobRepository(persistentStorage),
   validateProvider() {
     return chrome.runtime.sendMessage({ type: "VALIDATE_PROVIDER" });
   },
   extractCurrentCandidate() {
     return chrome.runtime.sendMessage({ type: "EXTRACT_CURRENT_CANDIDATE" });
   },
-  analyzeCandidate(job, candidateDraft) {
-    return chrome.runtime.sendMessage({ type: "ANALYZE_CANDIDATE", job, candidateDraft });
+  analyzeCandidate(job, candidateDraft, redactionContext, requestId) {
+    return chrome.runtime.sendMessage({
+      type: "ANALYZE_CANDIDATE",
+      requestId,
+      job,
+      candidateDraft,
+      redactionContext
+    });
+  },
+  cancelAnalysis(requestId) {
+    return chrome.runtime.sendMessage({ type: "CANCEL_ANALYSIS", requestId });
   },
   subscribeToPageContextChanges(listener) {
     const runtimeListener = (message: unknown) => {

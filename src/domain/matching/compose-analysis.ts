@@ -45,26 +45,66 @@ const validateDimensions = (modelResult: ModelMatchResult): void => {
   }
 };
 
+const rank: Record<Confidence, number> = { low: 0, medium: 1, high: 2 };
+
+const lowestConfidence = (...values: readonly Confidence[]): Confidence => values.reduce(
+  (lowest, value) => rank[value] < rank[lowest] ? value : lowest,
+  "high" as Confidence
+);
+
+const confidenceForSections = (draft: CandidateDraft): Confidence => {
+  if (draft.basics.status === "missing" || draft.workExperience.status === "missing") {
+    return "low";
+  }
+  if (
+    draft.basics.status === "possibly_incomplete"
+    || draft.workExperience.status === "possibly_incomplete"
+  ) {
+    return "medium";
+  }
+
+  const supportingGaps = (["projects", "education", "skills"] as const)
+    .filter((section) => draft[section].status !== "complete").length;
+  return supportingGaps >= 2 ? "low" : supportingGaps === 1 ? "medium" : "high";
+};
+
+const confidenceForModelGaps = (modelResult: ModelMatchResult): Confidence => {
+  const criticalGap = modelResult.missingInformation.some(({ claim }) =>
+    /核心|关键|硬性|工作经历|任职|年限|学历|证书/u.test(claim)
+  );
+  if (criticalGap || modelResult.missingInformation.length >= 3) return "low";
+  return modelResult.missingInformation.length > 0 ? "medium" : "high";
+};
+
 const deriveConfidence = (
-  extractionConfidence: Confidence,
+  modelResult: ModelMatchResult,
+  candidate: CandidateDraft | Confidence,
   unknownCount: number
 ): Confidence => {
-  const rank: Record<Confidence, number> = { low: 0, medium: 1, high: 2 };
   const confidenceForUnknowns: Confidence = unknownCount >= 2
     ? "low"
     : unknownCount === 1
       ? "medium"
       : "high";
+  const extractionConfidence = typeof candidate === "string"
+    ? candidate
+    : candidate.extractionConfidence;
+  const sectionConfidence = typeof candidate === "string"
+    ? "high"
+    : confidenceForSections(candidate);
 
-  return rank[extractionConfidence] <= rank[confidenceForUnknowns]
-    ? extractionConfidence
-    : confidenceForUnknowns;
+  return lowestConfidence(
+    extractionConfidence,
+    sectionConfidence,
+    confidenceForUnknowns,
+    confidenceForModelGaps(modelResult)
+  );
 };
 
 export function composeAnalysis(
   modelResult: ModelMatchResult,
   ruleResults: readonly RuleEvaluation[],
-  extractionConfidence: Confidence
+  candidate: CandidateDraft | Confidence
 ): MatchAnalysis {
   validateDimensions(modelResult);
 
@@ -85,7 +125,7 @@ export function composeAnalysis(
     ...modelResult,
     overallScore,
     recommendation,
-    confidence: deriveConfidence(extractionConfidence, unknownCount),
+    confidence: deriveConfidence(modelResult, candidate, unknownCount),
     hardRequirements: [...ruleResults]
   };
 }

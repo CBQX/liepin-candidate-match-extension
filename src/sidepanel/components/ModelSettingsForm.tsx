@@ -80,6 +80,11 @@ export function ModelSettingsForm({ onSave }: ModelSettingsFormProps) {
           />
           记住此设备
         </label>
+        {rememberDevice && (
+          <p className="privacy-warning" role="note">
+            API Key 的本地保存未加密；共享设备请勿使用“记住此设备”。
+          </p>
+        )}
         <p className="field-hint">默认仅保存到当前 Chrome 会话。</p>
 
         {submitError && <p className="form-error" role="alert">{submitError}</p>}

@@ -37,15 +37,15 @@ describe("ChromeProviderSettingsRepository", () => {
     expect((await local.get("providerSettings")).providerSettings).toBeUndefined();
   });
 
-  it("moves settings to local storage when remembering this device", async () => {
-    const local = new MemoryStorageArea();
+  it("moves settings to extension-origin persistent storage when remembering this device", async () => {
+    const persistent = new MemoryStorageArea();
     const session = new MemoryStorageArea();
-    const repo = new ChromeProviderSettingsRepository(local, session);
+    const repo = new ChromeProviderSettingsRepository(persistent, session);
     await repo.save(settings, false);
 
     await repo.save(settings, true);
 
-    expect((await local.get("providerSettings")).providerSettings).toEqual(settings);
+    expect((await persistent.get("providerSettings")).providerSettings).toEqual(settings);
     expect((await session.get("providerSettings")).providerSettings).toBeUndefined();
   });
 
@@ -71,5 +71,32 @@ describe("ChromeProviderSettingsRepository", () => {
 
     expect(await local.get("providerSettings")).toEqual({});
     expect(await session.get("providerSettings")).toEqual({});
+  });
+
+  it("rejects malformed stored provider settings at the repository boundary", async () => {
+    // Break caught: arbitrary or blank provider/model identifiers from legacy storage must not reach the registry.
+    const persistent = new MemoryStorageArea();
+    const session = new MemoryStorageArea();
+    await persistent.set({
+      providerSettings: { providerId: "", model: "deepseek-v4-pro", apiKey: "secret" }
+    });
+
+    expect(await new ChromeProviderSettingsRepository(persistent, session).load()).toBeUndefined();
+  });
+
+  it("returns the schema-normalized settings and drops unknown legacy fields", async () => {
+    // Break caught: using safeParse only as a boolean guard would return the untrusted object unchanged.
+    const persistent = new MemoryStorageArea();
+    const session = new MemoryStorageArea();
+    await session.set({
+      providerSettings: {
+        providerId: " deepseek ",
+        model: " deepseek-v4-pro ",
+        apiKey: " sk-test ",
+        unexpected: "must-not-cross-boundary"
+      }
+    });
+
+    expect(await new ChromeProviderSettingsRepository(persistent, session).load()).toEqual(settings);
   });
 });

@@ -5,7 +5,7 @@ import { candidateDraftSchema } from "../shared/contracts/candidate";
 import type { Job } from "../shared/contracts/job";
 import { matchAnalysisSchema } from "../shared/contracts/matching";
 import type { AppError } from "../shared/errors";
-import { redactCandidateDraft } from "../shared/privacy";
+import { prepareCandidateDraftForPreview } from "../shared/privacy";
 import {
   analysisSessionInitialState,
   analysisSessionReducer
@@ -42,6 +42,14 @@ export function App({ deps }: AppProps) {
     analysisSessionInitialState
   );
   const extractionGeneration = useRef(0);
+  const activeAnalysisRequestId = useRef<string | undefined>(undefined);
+
+  function sendCancellationForActiveRequest() {
+    const requestId = activeAnalysisRequestId.current;
+    if (!requestId) return;
+    activeAnalysisRequestId.current = undefined;
+    void deps.cancelAnalysis(requestId).catch(() => undefined);
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -68,6 +76,7 @@ export function App({ deps }: AppProps) {
 
   useEffect(() => {
     const clearForPageChange = () => {
+      sendCancellationForActiveRequest();
       extractionGeneration.current += 1;
       setExtractionError(undefined);
       setAnalysisError(undefined);
@@ -75,6 +84,7 @@ export function App({ deps }: AppProps) {
       dispatchAnalysisSession({ type: "PAGE_CHANGED" });
     };
     const endSession = () => {
+      sendCancellationForActiveRequest();
       extractionGeneration.current += 1;
       setExtractionError(undefined);
       setAnalysisError(undefined);
@@ -85,6 +95,7 @@ export function App({ deps }: AppProps) {
     window.addEventListener("beforeunload", endSession);
 
     return () => {
+      sendCancellationForActiveRequest();
       extractionGeneration.current += 1;
       unsubscribe();
       window.removeEventListener("beforeunload", endSession);
@@ -110,6 +121,7 @@ export function App({ deps }: AppProps) {
 
   async function saveJob(input: CreateJobInput) {
     try {
+      sendCancellationForActiveRequest();
       extractionGeneration.current += 1;
       dispatchAnalysisSession({ type: "JOB_CHANGED" });
       setExtractionError(undefined);
@@ -132,6 +144,7 @@ export function App({ deps }: AppProps) {
     setSwitchError("");
     setSwitchingJob(true);
     extractionGeneration.current += 1;
+    sendCancellationForActiveRequest();
     dispatchAnalysisSession({ type: "JOB_CHANGED" });
     setExtractionError(undefined);
     setAnalysisError(undefined);
@@ -171,10 +184,8 @@ export function App({ deps }: AppProps) {
         return undefined;
       }
 
-      dispatchAnalysisSession({
-        type: "DRAFT_LOADED",
-        draft: redactCandidateDraft(parsedDraft.data)
-      });
+      const prepared = prepareCandidateDraftForPreview(parsedDraft.data);
+      dispatchAnalysisSession({ type: "DRAFT_LOADED", ...prepared });
       return undefined;
     } catch {
       if (requestGeneration !== extractionGeneration.current) return undefined;
@@ -189,14 +200,20 @@ export function App({ deps }: AppProps) {
   async function analyzeCurrentCandidate() {
     const draft = analysisSession.draft;
     if (!activeJob || !draft) return undefined;
+    const redactionContext = analysisSession.redactionContext ?? {
+      identityTokens: [],
+      identityDetection: "undetected" as const
+    };
 
     const requestGeneration = extractionGeneration.current + 1;
     extractionGeneration.current = requestGeneration;
+    const requestId = crypto.randomUUID();
+    activeAnalysisRequestId.current = requestId;
     setAnalysisError(undefined);
     setAnalyzing(true);
 
     try {
-      const response = await deps.analyzeCandidate(activeJob, draft);
+      const response = await deps.analyzeCandidate(activeJob, draft, redactionContext, requestId);
       if (requestGeneration !== extractionGeneration.current) return undefined;
       if (!response.ok) {
         setAnalysisError(response.error);
@@ -222,6 +239,9 @@ export function App({ deps }: AppProps) {
       });
       return undefined;
     } finally {
+      if (activeAnalysisRequestId.current === requestId) {
+        activeAnalysisRequestId.current = undefined;
+      }
       if (requestGeneration === extractionGeneration.current) {
         setAnalyzing(false);
       }
@@ -229,9 +249,22 @@ export function App({ deps }: AppProps) {
   }
 
   function cancelCurrentAnalysis() {
+    sendCancellationForActiveRequest();
     extractionGeneration.current += 1;
     setAnalysisError(undefined);
     setAnalyzing(false);
+    dispatchAnalysisSession({ type: "ANALYSIS_CANCELLED" });
+  }
+
+  function beginAddingJob() {
+    sendCancellationForActiveRequest();
+    extractionGeneration.current += 1;
+    dispatchAnalysisSession({ type: "JOB_CHANGED" });
+    setExtractionError(undefined);
+    setAnalysisError(undefined);
+    setAnalyzing(false);
+    setSwitchError("");
+    setAddingJob(true);
   }
 
   const reconfigurationError = analysisError?.code === "MISSING_API_KEY"
@@ -251,10 +284,7 @@ export function App({ deps }: AppProps) {
           activeJobId={activeJob?.id}
           disabled={switchingJob}
           onChange={(id) => void switchJob(id)}
-          onAdd={() => {
-            setSwitchError("");
-            setAddingJob(true);
-          }}
+          onAdd={beginAddingJob}
         />
       )}
       {switchError && <p className="form-error" role="alert">{switchError}</p>}
@@ -297,6 +327,7 @@ export function App({ deps }: AppProps) {
         ) : analysisSession.draft ? (
           <CandidatePreview
             draft={analysisSession.draft}
+            identityDetection={analysisSession.redactionContext?.identityDetection}
             onChange={(section, text) => dispatchAnalysisSession({
               type: "DRAFT_EDITED",
               section,

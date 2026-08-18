@@ -17,10 +17,23 @@ import {
 } from "../shared/liepin-page";
 
 export class UnsupportedPageError extends Error {
-  constructor() {
-    super("仅支持猎聘候选人页面");
+  constructor(message = "仅支持猎聘候选人页面") {
+    super(message);
     this.name = "UnsupportedPageError";
   }
+}
+
+const SINGLE_PROFILE_SENTINELS = [
+  "[data-liepin-candidate-profile]",
+  "[data-testid='candidate-detail']",
+  ".candidate-detail",
+  ".candidate-detail-container",
+  ".resume-detail",
+  ".resume-detail-container"
+] as const;
+
+export function hasSingleCandidateProfileSentinel(sourceDocument: Document): boolean {
+  return SINGLE_PROFILE_SENTINELS.some((selector) => sourceDocument.querySelector(selector));
 }
 
 function emptySection(): ExtractedSection {
@@ -129,6 +142,9 @@ export function extractCandidate(
   ] as const).filter((section) => draft[section].status !== "missing").length;
 
   if (semanticCount < 2) {
+    if (!hasSingleCandidateProfileSentinel(sourceDocument)) {
+      throw new UnsupportedPageError("未识别到单个候选人详情内容");
+    }
     const fallbackText = extractVisibleText(body);
     draft.other = fallbackText
       ? { text: fallbackText, status: "possibly_incomplete" }

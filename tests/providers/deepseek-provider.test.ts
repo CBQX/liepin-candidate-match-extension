@@ -7,7 +7,10 @@ import {
   ModelProviderRegistry,
   type MatchInput
 } from "../../src/providers/model-provider";
-import type { ModelMatchResult } from "../../src/shared/contracts/matching";
+import {
+  dimensionIds,
+  type ModelMatchResult
+} from "../../src/shared/contracts/matching";
 
 const settings = {
   providerId: "deepseek",
@@ -38,11 +41,11 @@ const input: MatchInput = {
 };
 
 const modelResult: ModelMatchResult = {
-  dimensionScores: [{
-    dimensionId: "hard_requirements",
+  dimensionScores: dimensionIds.map((dimensionId) => ({
+    dimensionId,
     score: 90,
     evidence: ["候选人明确具备五年产品经验"]
-  }],
+  })),
   matches: [{
     claim: "产品经验匹配",
     jobEvidence: ["岗位要求五年产品经验"],
@@ -217,6 +220,20 @@ describe("DeepSeekProvider", () => {
     expect(fetcher).toHaveBeenCalledTimes(2);
   });
 
+  it("repairs an incomplete dimension response once before accepting all six dimensions", async () => {
+    // Break caught: schema validation at only the composer is too late to exercise the provider's repair path.
+    const incomplete = {
+      ...modelResult,
+      dimensionScores: modelResult.dimensionScores.slice(0, 5)
+    };
+    const fetcher = vi.fn<Fetcher>()
+      .mockResolvedValueOnce(completion(JSON.stringify(incomplete)))
+      .mockResolvedValueOnce(completion(JSON.stringify(modelResult)));
+
+    await expect(new DeepSeekProvider(fetcher).analyze(input, settings)).resolves.toEqual(modelResult);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
   it("maps HTTP 401 to INVALID_API_KEY without retrying", async () => {
     // Break caught: retrying a rejected credential wastes calls and obscures the required reconfiguration action.
     const fetcher = vi.fn<Fetcher>().mockResolvedValue(
@@ -253,8 +270,8 @@ describe("DeepSeekProvider", () => {
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
-  it("aborts analysis after 60 seconds and maps the timeout", async () => {
-    // Break caught: omitting the abort timer can leave the MV3 request and UI progress state hanging indefinitely.
+  it("aborts before 30 seconds when response headers do not arrive", async () => {
+    // Break caught: a 60-second first-response timer can outlive the MV3 service worker event budget.
     vi.useFakeTimers();
     const fetcher = vi.fn<Fetcher>().mockImplementation((_url, init) => new Promise((_resolve, reject) => {
       init?.signal?.addEventListener("abort", () => {
@@ -263,7 +280,7 @@ describe("DeepSeekProvider", () => {
     }));
     const errorPromise = caught(new DeepSeekProvider(fetcher).analyze(input, settings));
 
-    await vi.advanceTimersByTimeAsync(60_000);
+    await vi.advanceTimersByTimeAsync(25_000);
     const error = await errorPromise;
 
     expect(mapProviderError(error)).toMatchObject({ code: "MODEL_TIMEOUT" });
@@ -271,8 +288,8 @@ describe("DeepSeekProvider", () => {
     expect(fetcher.mock.calls[0]?.[1]?.signal?.aborted).toBe(true);
   });
 
-  it("keeps the 60-second timeout active while reading the response body", async () => {
-    // Break caught: clearing the timer after headers arrive leaves response.json able to hang forever.
+  it("uses a separate bounded timer while reading the response body", async () => {
+    // Break caught: clearing the header timer without a body timer leaves response.json able to hang forever.
     vi.useFakeTimers();
     const fetcher = vi.fn<Fetcher>().mockImplementation((_url, init) => {
       const body = new ReadableStream<Uint8Array>({
@@ -294,12 +311,54 @@ describe("DeepSeekProvider", () => {
         return error;
       });
 
-    await vi.advanceTimersByTimeAsync(60_000);
+    await vi.advanceTimersByTimeAsync(25_000);
 
     expect(settled).toBe(true);
     expect(mapProviderError(await errorPromise)).toMatchObject({ code: "MODEL_TIMEOUT" });
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect(fetcher.mock.calls[0]?.[1]?.signal?.aborted).toBe(true);
+  });
+
+  it("honors caller cancellation during the initial request", async () => {
+    // Break caught: hiding AbortController inside the adapter makes the UI cancel button cosmetic.
+    const external = new AbortController();
+    const fetcher = vi.fn<Fetcher>().mockImplementation((_url, init) => new Promise((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => reject(new DOMException("cancelled", "AbortError")));
+    }));
+    const errorPromise = caught(new DeepSeekProvider(fetcher).analyze(input, settings, external.signal));
+
+    external.abort();
+
+    expect(mapProviderError(await errorPromise)).toMatchObject({ code: "ANALYSIS_CANCELLED" });
+    expect(fetcher.mock.calls[0]?.[1]?.signal?.aborted).toBe(true);
+  });
+
+  it("does not start a request when the caller signal is already cancelled", async () => {
+    // Break caught: a boundary cancellation racing just before fetch must not issue a provider request.
+    const external = new AbortController();
+    external.abort();
+    const fetcher = vi.fn<Fetcher>();
+
+    const error = await caught(new DeepSeekProvider(fetcher).analyze(input, settings, external.signal));
+
+    expect(mapProviderError(error)).toMatchObject({ code: "ANALYSIS_CANCELLED" });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("honors caller cancellation during the repair request", async () => {
+    // Break caught: cancellation forwarded only to the first fetch can still send or hang the automatic repair call.
+    const external = new AbortController();
+    const fetcher = vi.fn<Fetcher>()
+      .mockResolvedValueOnce(completion(""))
+      .mockImplementationOnce((_url, init) => new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(new DOMException("cancelled", "AbortError")));
+      }));
+    const errorPromise = caught(new DeepSeekProvider(fetcher).analyze(input, settings, external.signal));
+    await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
+
+    external.abort();
+
+    expect(mapProviderError(await errorPromise)).toMatchObject({ code: "ANALYSIS_CANCELLED" });
   });
 
   it("rejects a blank key before contacting DeepSeek", async () => {

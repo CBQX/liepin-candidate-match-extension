@@ -1,7 +1,10 @@
 import type { RuntimeRequest, RuntimeResponse } from "../shared/contracts/messages";
 import type { ProviderSettings } from "../repositories/chrome-provider-settings";
-import type { ModelProvider } from "../providers/model-provider";
-import { mapProviderError } from "../providers/deepseek/deepseek-provider";
+import {
+  mapModelProviderError,
+  NormalizedProviderError,
+  type ModelProvider
+} from "../providers/model-provider";
 import { redactCandidateDraft } from "../shared/privacy";
 import { isSupportedLiepinCandidateDetailPage } from "../shared/liepin-page";
 import { analyzeCandidate } from "./analyze-candidate";
@@ -37,7 +40,7 @@ async function loadSettings(
   } catch {
     return {
       ok: false,
-      error: mapProviderError({ code: "STORAGE_FAILED" })
+      error: mapModelProviderError({ code: "STORAGE_FAILED" })
     };
   }
 }
@@ -45,8 +48,17 @@ async function loadSettings(
 export function createBackgroundController(
   dependencies: BackgroundControllerDependencies
 ): BackgroundController {
+  const activeAnalyses = new Map<string, AbortController>();
+
   return {
     async handle(request) {
+      if (request.type === "CANCEL_ANALYSIS") {
+        const activeAnalysis = activeAnalyses.get(request.requestId);
+        activeAnalysis?.abort();
+        activeAnalyses.delete(request.requestId);
+        return { ok: true, data: { cancelled: Boolean(activeAnalysis) } };
+      }
+
       if (request.type === "VALIDATE_PROVIDER") {
         const loadedSettings = await loadSettings(dependencies);
         if (!loadedSettings.ok) return loadedSettings;
@@ -56,7 +68,7 @@ export function createBackgroundController(
           if (!settings || settings.apiKey.trim() === "") {
             return {
               ok: false,
-              error: mapProviderError({ code: "MISSING_API_KEY" })
+              error: mapModelProviderError({ code: "MISSING_API_KEY" })
             };
           }
 
@@ -64,27 +76,34 @@ export function createBackgroundController(
           if (!provider) {
             return {
               ok: false,
-              error: mapProviderError({ code: "INVALID_PROVIDER_SETTINGS" })
+              error: mapModelProviderError({ code: "INVALID_PROVIDER_SETTINGS" })
             };
           }
 
           await provider.validateCredentials(settings);
           return { ok: true, data: { valid: true } };
         } catch (error) {
-          return { ok: false, error: mapProviderError(error) };
+          return { ok: false, error: mapModelProviderError(error) };
         }
       }
 
       if (request.type === "ANALYZE_CANDIDATE") {
-        const loadedSettings = await loadSettings(dependencies);
-        if (!loadedSettings.ok) return loadedSettings;
+        activeAnalyses.get(request.requestId)?.abort();
+        const abortController = new AbortController();
+        activeAnalyses.set(request.requestId, abortController);
 
         try {
+          const loadedSettings = await loadSettings(dependencies);
+          if (abortController.signal.aborted) {
+            throw new NormalizedProviderError("ANALYSIS_CANCELLED");
+          }
+          if (!loadedSettings.ok) return loadedSettings;
+
           const settings = loadedSettings.data;
           if (!settings || settings.apiKey.trim() === "") {
             return {
               ok: false,
-              error: mapProviderError({ code: "MISSING_API_KEY" })
+              error: mapModelProviderError({ code: "MISSING_API_KEY" })
             };
           }
 
@@ -92,18 +111,23 @@ export function createBackgroundController(
           if (!provider) {
             return {
               ok: false,
-              error: mapProviderError({ code: "INVALID_PROVIDER_SETTINGS" })
+              error: mapModelProviderError({ code: "INVALID_PROVIDER_SETTINGS" })
             };
           }
 
           const analysis = await analyzeCandidate(request, {
             provider,
             settings,
-            redact: redactCandidateDraft
+            redact: redactCandidateDraft,
+            signal: abortController.signal
           });
           return { ok: true, data: analysis };
         } catch (error) {
-          return { ok: false, error: mapProviderError(error) };
+          return { ok: false, error: mapModelProviderError(error) };
+        } finally {
+          if (activeAnalyses.get(request.requestId) === abortController) {
+            activeAnalyses.delete(request.requestId);
+          }
         }
       }
 

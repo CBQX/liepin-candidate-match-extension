@@ -89,6 +89,7 @@ function createFakeDependencies(initial: {
       ok: false as const,
       error: { code: "UNKNOWN" as const, message: "测试中未配置分析结果。" }
     })),
+    cancelAnalysis: vi.fn(async () => ({ ok: true as const, data: { cancelled: true } })),
     subscribeToPageContextChanges: vi.fn(() => () => undefined)
   } satisfies SidePanelDependencies;
 }
@@ -135,6 +136,21 @@ describe("side-panel model settings", () => {
     expect(screen.getByText("请输入 DeepSeek API Key")).toBeTruthy();
     expect(deps.providerSettings.save).not.toHaveBeenCalled();
     expect(deps.validateProvider).not.toHaveBeenCalled();
+  });
+
+  it("shows an adjacent unencrypted-storage warning only when remember-device is selected", async () => {
+    // Break caught: users could persist a BYOK secret on a shared device without seeing the state-dependent risk.
+    const deps = createFakeDependencies();
+    const user = userEvent.setup();
+    render(<App deps={deps} />);
+
+    const rememberDevice = await screen.findByRole("checkbox", { name: "记住此设备" });
+    expect(screen.queryByText(/本地保存未加密.*共享设备请勿使用/u)).toBeNull();
+
+    await user.click(rememberDevice);
+
+    const warning = screen.getByText(/本地保存未加密.*共享设备请勿使用/u);
+    expect(warning.previousElementSibling?.textContent).toContain("记住此设备");
   });
 });
 

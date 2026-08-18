@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { evaluateObjectiveRules } from "../../src/domain/matching/rules";
+import { extractObjectiveFacts } from "../../src/domain/matching/facts";
+import type { CandidateDraft } from "../../src/shared/contracts/candidate";
 import type { JobCriterion } from "../../src/shared/contracts/matching";
 
 const criterion = (text: string): JobCriterion => ({
@@ -7,6 +9,16 @@ const criterion = (text: string): JobCriterion => ({
   text,
   priority: "hard",
   source: "custom"
+});
+
+const draftWith = (overrides: Partial<Record<keyof Omit<CandidateDraft, "extractionConfidence">, string>>): CandidateDraft => ({
+  basics: { text: overrides.basics ?? "候选人，上海", status: "complete" },
+  workExperience: { text: overrides.workExperience ?? "", status: overrides.workExperience ? "complete" : "missing" },
+  projects: { text: overrides.projects ?? "", status: overrides.projects ? "complete" : "missing" },
+  education: { text: overrides.education ?? "", status: overrides.education ? "complete" : "missing" },
+  skills: { text: overrides.skills ?? "", status: overrides.skills ? "complete" : "missing" },
+  other: { text: overrides.other ?? "", status: overrides.other ? "complete" : "missing" },
+  extractionConfidence: "high"
 });
 
 describe("evaluateObjectiveRules", () => {
@@ -36,14 +48,18 @@ describe("evaluateObjectiveRules", () => {
   it("compares explicit years of experience without treating absence as failure", () => {
     const [met] = evaluateObjectiveRules(
       [criterion("必须有 5 年以上经验")],
-      { tokens: new Set(), yearsExperience: 8 }
+      {
+        tokens: new Set(),
+        yearsExperience: 8,
+        yearsExperienceEvidence: "工作经历：工作经验：8 年"
+      }
     );
     const [unknown] = evaluateObjectiveRules(
       [criterion("必须有 5 年以上经验")],
       { tokens: new Set() }
     );
 
-    expect(met).toEqual({ criterionId: "c1", status: "met", evidence: ["明确工作经验：8 年"] });
+    expect(met).toEqual({ criterionId: "c1", status: "met", evidence: ["工作经历：工作经验：8 年"] });
     expect(unknown?.status).toBe("unknown");
   });
 
@@ -78,14 +94,50 @@ describe("evaluateObjectiveRules", () => {
   it("matches an explicit certificate token", () => {
     const [result] = evaluateObjectiveRules(
       [criterion("必须持有 PMP")],
-      { tokens: new Set(["pmp"]), locations: new Set(["上海"]) }
+      {
+        tokens: new Set(["pmp"]),
+        tokenEvidence: new Map([["pmp", ["技能：持有 PMP 证书"]]]),
+        locations: new Set(["上海"])
+      }
     );
 
     expect(result).toEqual({
       criterionId: "c1",
       status: "met",
-      evidence: ["明确证书：PMP"]
+      evidence: ["技能：持有 PMP 证书"]
     });
+  });
+
+  it("does not treat customer years or a training-project certificate mention as candidate possession", () => {
+    // Break caught: aggregating every resume token can turn customer tenure and training topics into candidate credentials.
+    const facts = extractObjectiveFacts(draftWith({
+      workExperience: "服务某客户，累计 8 年工作经验，持续提供招聘支持",
+      projects: "为客户开展 PMP 认证培训项目，项目周期 5 年"
+    }));
+
+    expect(evaluateObjectiveRules([
+      criterion("必须有 5 年以上经验"),
+      { ...criterion("必须持有 PMP"), id: "c2" }
+    ], facts)).toEqual([
+      { criterionId: "c1", status: "unknown", evidence: [] },
+      { criterionId: "c2", status: "unknown", evidence: [] }
+    ]);
+  });
+
+  it("uses labeled candidate years and possession language as auditable evidence", () => {
+    // Break caught: making rules conservative must not discard explicit candidate-owned facts.
+    const facts = extractObjectiveFacts(draftWith({
+      workExperience: "工作经验：8 年；负责企业软件产品",
+      skills: "证书：PMP；持有法律职业资格"
+    }));
+
+    expect(evaluateObjectiveRules([
+      criterion("必须有 5 年以上经验"),
+      { ...criterion("必须持有 PMP"), id: "c2" }
+    ], facts)).toEqual([
+      { criterionId: "c1", status: "met", evidence: ["工作经历：工作经验：8 年"] },
+      { criterionId: "c2", status: "met", evidence: ["技能：证书：PMP"] }
+    ]);
   });
 
   it.each(["和田", "共和"])("keeps the explicit %s location unknown without misparsing its characters", (location) => {

@@ -1,12 +1,18 @@
 import type { StorageAreaLike } from "./storage-area";
+import { z } from "zod";
 
 const PROVIDER_SETTINGS_KEY = "providerSettings";
 
-export interface ProviderSettings {
-  providerId: string;
-  model: string;
-  apiKey: string;
-}
+const providerIdentifier = z.string().trim().min(1).max(128)
+  .regex(/^[A-Za-z0-9._:-]+$/u);
+
+export const providerSettingsSchema = z.object({
+  providerId: providerIdentifier,
+  model: providerIdentifier,
+  apiKey: z.string().trim().min(1).max(4096)
+});
+
+export type ProviderSettings = z.infer<typeof providerSettingsSchema>;
 
 export class ChromeProviderSettingsRepository {
   constructor(
@@ -17,16 +23,18 @@ export class ChromeProviderSettingsRepository {
   async save(settings: ProviderSettings, rememberDevice: boolean): Promise<void> {
     const destination = rememberDevice ? this.local : this.session;
     const staleStorage = rememberDevice ? this.session : this.local;
-    await destination.set({ [PROVIDER_SETTINGS_KEY]: settings });
+    const parsedSettings = providerSettingsSchema.parse(settings);
+    await destination.set({ [PROVIDER_SETTINGS_KEY]: parsedSettings });
     await staleStorage.remove(PROVIDER_SETTINGS_KEY);
   }
 
   async load(): Promise<ProviderSettings | undefined> {
     const sessionSettings = (await this.session.get(PROVIDER_SETTINGS_KEY))[PROVIDER_SETTINGS_KEY];
-    if (isProviderSettings(sessionSettings)) return sessionSettings;
+    const parsedSessionSettings = parseProviderSettings(sessionSettings);
+    if (parsedSessionSettings) return parsedSessionSettings;
 
     const localSettings = (await this.local.get(PROVIDER_SETTINGS_KEY))[PROVIDER_SETTINGS_KEY];
-    return isProviderSettings(localSettings) ? localSettings : undefined;
+    return parseProviderSettings(localSettings);
   }
 
   async clear(): Promise<void> {
@@ -37,11 +45,7 @@ export class ChromeProviderSettingsRepository {
   }
 }
 
-function isProviderSettings(value: unknown): value is ProviderSettings {
-  if (typeof value !== "object" || value === null) return false;
-
-  const settings = value as Record<string, unknown>;
-  return typeof settings.providerId === "string"
-    && typeof settings.model === "string"
-    && typeof settings.apiKey === "string";
+function parseProviderSettings(value: unknown): ProviderSettings | undefined {
+  const parsed = providerSettingsSchema.safeParse(value);
+  return parsed.success ? parsed.data : undefined;
 }

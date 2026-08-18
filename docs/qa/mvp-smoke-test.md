@@ -5,7 +5,7 @@
 
 ## 构建基线
 
-- [ ] 使用 Node.js 20 或更高版本执行 `npm ci`。
+- [ ] 使用 Node.js 20.19.0 或更高版本执行 `npm ci`。
 - [ ] 执行 `npm run verify`，确认类型检查、全部测试和生产构建均通过。
 - [ ] 检查 `dist/` 至少包含 `manifest.json`、`sidepanel.html`、`background.js`、`content.js` 和侧边栏静态资源。
 - [ ] 确认 `dist/manifest.json` 为 Manifest V3、最低 Chrome 116，且仅申请 `sidePanel`、`storage`、猎聘域名和 DeepSeek API 域名权限。
@@ -13,11 +13,12 @@
 ### 开发交付验证记录（不等同于浏览器人工验收）
 
 - 日期：2026-08-18
-- `npm run verify`：通过（21 个测试文件、184 项测试；类型检查和生产构建通过）
+- `npm run verify`：通过；TypeScript 类型检查、22 个测试文件 / 220 项测试和生产构建均通过
+- Node 20 依赖引擎静态检查：`package-lock.json` 中 132 项 Node 引擎声明全部接受 Node 20.19.0；本次自动化实际运行时为 Node 24.16.0，目标电脑仍应按上方清单使用 Node 20.19.0+ 复核
 - `dist/` 静态完整性：通过，包含 `manifest.json`、`sidepanel.html`、`background.js`、`content.js`、侧边栏 JS/CSS 资源
 - 权限静态检查：通过，Manifest V3、最低 Chrome 116；权限为 `sidePanel`、`storage`；主机范围为猎聘和 DeepSeek API
-- 源码数据安全检查：持久化实现仅写入岗位、当前岗位 ID 和模型供应商设置；未发现候选人/分析结果仓库或候选人内容日志
-- macOS Chrome 人工加载：**待执行**。本次开发环境中不存在 `/Applications/Google Chrome.app`，因此未打开浏览器、未加载扩展，也未使用任何真实或匿名候选人数据。请在安装 Chrome 116+ 的目标 macOS 电脑上完成下方清单。
+- 自动化存储边界检查：通过注入式 IndexedDB 适配器验证读写/删除、旧 `chrome.storage.local` 键迁移清理和 `STORAGE_FAILED`；持久化实现仅允许岗位、当前岗位 ID 和用户主动记住的供应商设置，未发现候选人/分析结果仓库或候选人内容日志
+- Chrome 116 真实加载与授权猎聘页面：**待目标 macOS/Windows 设备人工执行**；当前记录不以静态检查替代浏览器结论，也未使用候选人数据
 
 ### 可执行的无效 Key 与恢复检查
 
@@ -33,7 +34,7 @@
 **B. 已编辑预览后的分析失败与恢复**
 
 1. 使用有效测试配置进入候选人预览，编辑“技能”字段并记住一段不敏感的合成标记，例如 `QA-EDIT-RETAINED`，暂不点击“确认并分析”。
-2. 打开 `chrome://extensions`，在扩展卡片中点击 Service Worker 的“检查视图”，在其控制台执行下列命令。该对象结构与插件仓库实际使用的 `providerSettings` 键一致，并且 `chrome.storage.session` 优先于本地副本：
+2. 打开 `chrome://extensions`，在扩展卡片中点击 Service Worker 的“检查视图”，在其控制台执行下列命令。该对象结构与插件仓库实际使用的 `providerSettings` 键一致，并且 `chrome.storage.session` 优先于用户主动记住的 IndexedDB 副本：
 
    ```js
    await chrome.storage.session.set({
@@ -45,18 +46,35 @@
    });
    ```
 
-3. 回到侧边栏点击“确认并分析”，确认出现无效 Key 提示和“重新配置模型”按钮；点击该按钮。
+3. 回到侧边栏完成人工隐私检查并勾选确认，再点击“确认并分析”；确认出现无效 Key 提示和“重新配置模型”按钮后点击该按钮。
 4. 只在 UI 中输入获批的有效测试 Key 并完成验证。确认自动返回候选人预览，且 `QA-EDIT-RETAINED` 仍存在。
-5. 再次点击“确认并分析”，确认可以成功得到结果。完成 QA 后在 Service Worker 控制台清除测试配置：
+5. 再次勾选提交前隐私确认并点击“确认并分析”，确认可以成功得到结果。完成 QA 后在 Service Worker 控制台清除会话测试配置：
 
    ```js
    await Promise.all([
      chrome.storage.session.remove("providerSettings"),
-     chrome.storage.local.remove("providerSettings")
+     chrome.storage.local.remove(["jobs", "activeJobId", "providerSettings"])
    ]);
    ```
 
-6. 如需确认清理，只查看键名而不是值：`Object.keys(await chrome.storage.session.get(null))` 和 `Object.keys(await chrome.storage.local.get(null))`。
+6. 如需清除“记住此设备”的 IndexedDB 测试 Key，在同一扩展 Service Worker 控制台执行以下不读取值的命令：
+
+   ```js
+   const request = indexedDB.open("liepin-candidate-match-extension");
+   const db = await new Promise((resolve, reject) => {
+     request.onsuccess = () => resolve(request.result);
+     request.onerror = () => reject(request.error);
+   });
+   const transaction = db.transaction("persistentSettings", "readwrite");
+   transaction.objectStore("persistentSettings").delete("providerSettings");
+   await new Promise((resolve, reject) => {
+     transaction.oncomplete = resolve;
+     transaction.onerror = () => reject(transaction.error);
+   });
+   db.close();
+   ```
+
+7. 如需确认清理，只查看键名而不是值：`Object.keys(await chrome.storage.session.get(null))`、`Object.keys(await chrome.storage.local.get(null))`；IndexedDB 只用 `getAllKeys()` 检查键名，禁止读取/打印 `providerSettings` 值。
 
 ## macOS Chrome 116+
 
@@ -76,14 +94,14 @@
 - [ ] 2. 点击工具栏中的“猎头匹配助手”，确认 Chrome 侧边栏打开。
 - [ ] 3. 在添加岗位页面分别留空公司、职位 JD、个性化要求并提交，确认三项均被拒绝且出现中文提示。
 - [ ] 4. 保存两个合成岗位，在“当前岗位”下拉框中来回切换，确认始终只有一个岗位处于当前状态。
-- [ ] 5. 先在猎聘首页、搜索/列表、公司或职位页面点击“匹配分析”，确认提示“请在猎聘候选人详情页中使用此功能”且不出现整页文本预览；再主动打开一个已审核支持的单候选人详情路由并继续。工程冒烟使用合成页面或充分匿名化授权样本，不执行批量、自动翻页或隐藏内容抓取。
-- [ ] 6. 点击“匹配分析”，确认先出现可编辑预览；修改至少一个字段，阅读发送提示后点击“确认并分析”。
+- [ ] 5. 先在猎聘首页、`/candidate/search`、`/candidate/list`、其他搜索/列表、公司或职位页面点击“匹配分析”，确认提示“请在猎聘候选人详情页中使用此功能”且不出现整页文本预览；再主动打开一个已审核支持的单候选人详情路由并继续。若真实路由或 DOM 哨兵尚未审核，记录为待适配而不是放宽到整页文本。工程冒烟使用合成页面或充分匿名化授权样本，不执行批量、自动翻页或隐藏内容抓取。
+- [ ] 6. 点击“匹配分析”，确认先出现可编辑预览；修改至少一个字段，确认隐私勾选因编辑而重置；人工检查姓名、联系方式和猎聘 ID，重新勾选确认后再点击“确认并分析”。
 - [ ] 7. 确认结果包含总分、推荐等级、可信度、六维评分、硬性条件及证据、匹配项、不匹配项、风险、缺失信息、核实问题、沟通建议和猎头结论。
 - [ ] 8. 分别执行上方“A. 首次设置时验证无效 Key”和“B. 已编辑预览后的分析失败与恢复”，确认两项结果均符合预期；不要在记录中填写 Key 或候选人内容。
 - [ ] 9. 切换到另一个岗位，确认上一候选人预览、编辑内容和分析结果全部消失；再次分析必须重新提取。
-- [ ] 10. 在扩展 Service Worker 的开发者工具中执行 `Object.keys(await chrome.storage.local.get(null))`，只检查返回的键名：应仅包含 `jobs`、`activeJobId`，以及用户主动勾选“记住此设备”时的 `providerSettings`；不得出现候选人或分析结果，不要读取或打印存储值。
+- [ ] 10. 在扩展 Service Worker 的开发者工具中只检查键名：`Object.keys(await chrome.storage.local.get(null))` 不得包含 `jobs`、`activeJobId` 或 `providerSettings`（旧版升级后应已迁移清理）；扩展源 IndexedDB 的 `persistentSettings.getAllKeys()` 只允许 `jobs`、`activeJobId`，以及用户主动勾选时的 `providerSettings`。任何存储均不得出现候选人草稿、脱敏令牌或分析结果，不要读取/打印值。
 - [ ] 11. 不勾选“记住此设备”保存测试 Key，完全退出并重启 Chrome，确认供应商设置/Key 不再可用，需要重新配置。
-- [ ] 12. 主动勾选“记住此设备”保存测试配置，完全退出并重启 Chrome，确认只恢复供应商设置；`chrome.storage.local` 仍不得出现候选人草稿或结果。完成后清除测试 Key。
+- [ ] 12. 主动勾选“记住此设备”，确认未加密/共享设备警告在保存前可见；保存测试配置，完全退出并重启 Chrome，确认只从扩展源 IndexedDB 恢复供应商设置；`chrome.storage.local` 保持无上述旧键，任何存储均不得出现候选人草稿、脱敏令牌或结果。完成后按上文清除测试 Key。
 
 失败/偏差记录（不得包含敏感数据）：
 
@@ -109,14 +127,14 @@
 - [ ] 2. 点击工具栏中的“猎头匹配助手”，确认 Chrome 侧边栏打开。
 - [ ] 3. 在添加岗位页面分别留空公司、职位 JD、个性化要求并提交，确认三项均被拒绝且出现中文提示。
 - [ ] 4. 保存两个合成岗位，在“当前岗位”下拉框中来回切换，确认始终只有一个岗位处于当前状态。
-- [ ] 5. 先在猎聘首页、搜索/列表、公司或职位页面点击“匹配分析”，确认提示“请在猎聘候选人详情页中使用此功能”且不出现整页文本预览；再主动打开一个已审核支持的单候选人详情路由并继续。工程冒烟使用合成页面或充分匿名化授权样本，不执行批量、自动翻页或隐藏内容抓取。
-- [ ] 6. 点击“匹配分析”，确认先出现可编辑预览；修改至少一个字段，阅读发送提示后点击“确认并分析”。
+- [ ] 5. 先在猎聘首页、`/candidate/search`、`/candidate/list`、其他搜索/列表、公司或职位页面点击“匹配分析”，确认提示“请在猎聘候选人详情页中使用此功能”且不出现整页文本预览；再主动打开一个已审核支持的单候选人详情路由并继续。若真实路由或 DOM 哨兵尚未审核，记录为待适配而不是放宽到整页文本。工程冒烟使用合成页面或充分匿名化授权样本，不执行批量、自动翻页或隐藏内容抓取。
+- [ ] 6. 点击“匹配分析”，确认先出现可编辑预览；修改至少一个字段，确认隐私勾选因编辑而重置；人工检查姓名、联系方式和猎聘 ID，重新勾选确认后再点击“确认并分析”。
 - [ ] 7. 确认结果包含总分、推荐等级、可信度、六维评分、硬性条件及证据、匹配项、不匹配项、风险、缺失信息、核实问题、沟通建议和猎头结论。
 - [ ] 8. 分别执行上方“A. 首次设置时验证无效 Key”和“B. 已编辑预览后的分析失败与恢复”，确认两项结果均符合预期；不要在记录中填写 Key 或候选人内容。
 - [ ] 9. 切换到另一个岗位，确认上一候选人预览、编辑内容和分析结果全部消失；再次分析必须重新提取。
-- [ ] 10. 在扩展 Service Worker 的开发者工具中执行 `Object.keys(await chrome.storage.local.get(null))`，只检查返回的键名：应仅包含 `jobs`、`activeJobId`，以及用户主动勾选“记住此设备”时的 `providerSettings`；不得出现候选人或分析结果，不要读取或打印存储值。
+- [ ] 10. 在扩展 Service Worker 的开发者工具中只检查键名：`Object.keys(await chrome.storage.local.get(null))` 不得包含 `jobs`、`activeJobId` 或 `providerSettings`（旧版升级后应已迁移清理）；扩展源 IndexedDB 的 `persistentSettings.getAllKeys()` 只允许 `jobs`、`activeJobId`，以及用户主动勾选时的 `providerSettings`。任何存储均不得出现候选人草稿、脱敏令牌或分析结果，不要读取/打印值。
 - [ ] 11. 不勾选“记住此设备”保存测试 Key，完全退出并重启 Chrome，确认供应商设置/Key 不再可用，需要重新配置。
-- [ ] 12. 主动勾选“记住此设备”保存测试配置，完全退出并重启 Chrome，确认只恢复供应商设置；`chrome.storage.local` 仍不得出现候选人草稿或结果。完成后清除测试 Key。
+- [ ] 12. 主动勾选“记住此设备”，确认未加密/共享设备警告在保存前可见；保存测试配置，完全退出并重启 Chrome，确认只从扩展源 IndexedDB 恢复供应商设置；`chrome.storage.local` 保持无上述旧键，任何存储均不得出现候选人草稿、脱敏令牌或结果。完成后按上文清除测试 Key。
 
 失败/偏差记录（不得包含敏感数据）：
 

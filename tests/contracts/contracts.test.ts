@@ -1,17 +1,18 @@
 import { describe, expect, it } from "vitest";
 import { jobSchema } from "../../src/shared/contracts/job";
 import {
+  dimensionIds,
   matchAnalysisSchema,
   modelMatchResultSchema,
   ruleEvaluationSchema
 } from "../../src/shared/contracts/matching";
 
 const evidenceBackedModelResult = {
-  dimensionScores: [{
-    dimensionId: "hard_requirements" as const,
+  dimensionScores: dimensionIds.map((dimensionId) => ({
+    dimensionId,
     score: 80,
     evidence: ["岗位与候选人材料中的明确依据"]
-  }],
+  })),
   matches: [],
   mismatches: [],
   risks: [],
@@ -53,6 +54,21 @@ describe("runtime contracts", () => {
         ...evidenceBackedModelResult.dimensionScores[0],
         evidence: []
       }]
+    }).success).toBe(false);
+  });
+
+  it("requires every matching dimension exactly once in model output", () => {
+    // Break caught: incomplete or duplicate dimensions must trigger the provider repair request, not reach composition.
+    expect(modelMatchResultSchema.safeParse({
+      ...evidenceBackedModelResult,
+      dimensionScores: evidenceBackedModelResult.dimensionScores.slice(0, 5)
+    }).success).toBe(false);
+    expect(modelMatchResultSchema.safeParse({
+      ...evidenceBackedModelResult,
+      dimensionScores: [
+        ...evidenceBackedModelResult.dimensionScores.slice(0, 5),
+        evidenceBackedModelResult.dimensionScores[0]
+      ]
     }).success).toBe(false);
   });
 

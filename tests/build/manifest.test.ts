@@ -49,4 +49,16 @@ describe("extension manifest", () => {
       expect.arrayContaining(wildcardHosts)
     );
   });
+
+  it("uses extension-origin IndexedDB instead of relying on Chrome 116 local access levels", async () => {
+    // Break caught: local.setAccessLevel only became available after the declared Chrome 116 floor.
+    const wiring = await Promise.all([
+      readFile("src/background/service-worker.ts", "utf8"),
+      readFile("src/sidepanel/app-dependencies.ts", "utf8")
+    ]).then((sources) => sources.join("\n"));
+
+    expect(wiring).toContain("new IndexedDbStorageArea");
+    expect(wiring).not.toContain("chrome.storage.local.setAccessLevel");
+    expect(wiring).not.toContain("new ChromeJobRepository(chrome.storage.local)");
+  });
 });

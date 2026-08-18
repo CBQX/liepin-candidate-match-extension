@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { composeAnalysis } from "../../src/domain/matching/compose-analysis";
 import { evaluateObjectiveRules } from "../../src/domain/matching/rules";
 import type { ModelMatchResult } from "../../src/shared/contracts/matching";
+import type { CandidateDraft } from "../../src/shared/contracts/candidate";
 
 const dimensionIds = [
   "hard_requirements",
@@ -29,6 +30,16 @@ const modelResultWithScores = (scores: readonly number[]): ModelMatchResult => (
 
 const modelResultWithAllDimensionsAt = (score: number) =>
   modelResultWithScores([score, score, score, score, score, score]);
+
+const completeDraft: CandidateDraft = {
+  basics: { text: "候选人，上海", status: "complete" },
+  workExperience: { text: "明确工作经历", status: "complete" },
+  projects: { text: "项目经历", status: "complete" },
+  education: { text: "本科", status: "complete" },
+  skills: { text: "产品规划", status: "complete" },
+  other: { text: "", status: "missing" },
+  extractionConfidence: "high"
+};
 
 describe("composeAnalysis", () => {
   it("computes the weighted score and prevents strong recommendation on a hard failure", () => {
@@ -89,6 +100,44 @@ describe("composeAnalysis", () => {
 
     expect(oneUnknown.confidence).toBe("medium");
     expect(severalUnknown.confidence).toBe("low");
+  });
+
+  it("sets low confidence when a core candidate section is missing despite a high extraction flag", () => {
+    // Break caught: trusting extractionConfidence alone can label an analysis high-confidence with no work history.
+    const analysis = composeAnalysis(modelResultWithAllDimensionsAt(80), [], {
+      ...completeDraft,
+      workExperience: { text: "", status: "missing" }
+    });
+
+    expect(analysis.confidence).toBe("low");
+  });
+
+  it("lowers confidence for critical model gaps even when extracted sections are complete", () => {
+    // Break caught: a model-reported gap about core experience must affect the displayed confidence.
+    const modelResult: ModelMatchResult = {
+      ...modelResultWithAllDimensionsAt(80),
+      missingInformation: [{
+        claim: "关键工作年限与任职范围无法确认",
+        jobEvidence: ["岗位要求核心工作年限"],
+        candidateEvidence: ["候选人材料未提供可核实时间范围"]
+      }]
+    };
+
+    expect(composeAnalysis(modelResult, [], completeDraft).confidence).toBe("low");
+  });
+
+  it("caps confidence at medium when non-core section gaps or model gaps remain", () => {
+    // Break caught: several otherwise-complete sections should not hide a meaningful but non-critical information gap.
+    const modelResult: ModelMatchResult = {
+      ...modelResultWithAllDimensionsAt(80),
+      missingInformation: [{
+        claim: "需要补充团队规模",
+        jobEvidence: ["岗位关注管理跨度"],
+        candidateEvidence: ["候选人材料未说明团队人数"]
+      }]
+    };
+
+    expect(composeAnalysis(modelResult, [], completeDraft).confidence).toBe("medium");
   });
 
   it("does not apply hard gates to preferred objective criteria", () => {

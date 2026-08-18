@@ -116,11 +116,13 @@ const evaluateCriterion = (criterion: JobCriterion, facts: ObjectiveFacts): Rule
     ? requiredYears(criterion.text)
     : undefined;
   if (years !== undefined) {
-    if (facts.yearsExperience === undefined) return evaluation(criterion.id, "unknown");
+    if (facts.yearsExperience === undefined || !facts.yearsExperienceEvidence) {
+      return evaluation(criterion.id, "unknown");
+    }
     return evaluation(
       criterion.id,
       facts.yearsExperience >= years ? "met" : "not_met",
-      [`明确工作经验：${facts.yearsExperience} 年`]
+      [facts.yearsExperienceEvidence]
     );
   }
 
@@ -131,9 +133,10 @@ const evaluateCriterion = (criterion: JobCriterion, facts: ObjectiveFacts): Rule
 
   const token = requiredToken(criterion.text);
   if (token && isSupportedTokenCriterion(criterion.text, token[2])) {
-    const [normalized, label] = token;
-    return facts.tokens.has(normalized)
-      ? evaluation(criterion.id, "met", [`明确证书：${label}`])
+    const [normalized] = token;
+    const evidence = facts.tokenEvidence?.get(normalized) ?? [];
+    return facts.tokens.has(normalized) && evidence.length > 0
+      ? evaluation(criterion.id, "met", evidence)
       : evaluation(criterion.id, "unknown");
   }
 

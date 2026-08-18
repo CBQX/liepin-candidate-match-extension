@@ -31,6 +31,11 @@ const result: MatchAnalysis = {
   recruiterConclusion: "建议推进"
 };
 
+const redactionContext = {
+  identityTokens: ["张三"],
+  identityDetection: "confirmed" as const
+};
+
 describe("analysis session reducer", () => {
   it.each(["JOB_CHANGED", "PAGE_CHANGED", "SESSION_ENDED"] as const)(
     "%s clears both the candidate draft and analysis result",
@@ -46,7 +51,8 @@ describe("analysis session reducer", () => {
     // Break caught: preview edits could be ignored, leaving the uncorrected extracted content for analysis.
     const loaded = analysisSessionReducer(analysisSessionInitialState, {
       type: "DRAFT_LOADED",
-      draft
+      draft,
+      redactionContext
     });
     const edited = analysisSessionReducer(loaded, {
       type: "DRAFT_EDITED",
@@ -57,5 +63,13 @@ describe("analysis session reducer", () => {
     expect(edited.draft?.skills.text).toBe("SaaS、AI");
     expect(edited.draft?.skills.status).toBe("complete");
     expect(loaded.draft?.skills.text).toBe("SaaS");
+    expect(edited.redactionContext).toEqual(redactionContext);
+  });
+
+  it("preserves the preview but clears identity tokens after analysis cancellation", () => {
+    // Break caught: cancellation must not retain identity metadata while the edited preview is restored.
+    const populated = { draft, redactionContext };
+
+    expect(analysisSessionReducer(populated, { type: "ANALYSIS_CANCELLED" })).toEqual({ draft });
   });
 });

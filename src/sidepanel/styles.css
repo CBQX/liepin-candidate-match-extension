@@ -262,6 +262,25 @@ select:disabled {
   line-height: 1.5;
 }
 
+.privacy-warning {
+  margin: 0;
+  border: 1px solid #efd7a0;
+  border-radius: 8px;
+  background: #fff8e8;
+  padding: 9px 10px;
+  color: #76540b;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.privacy-confirmation {
+  align-items: flex-start;
+  color: #364039;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.5;
+}
+
 .candidate-preview .primary-button,
 .error-card .primary-button {
   width: 100%;

@@ -4,17 +4,23 @@ import { ChromeProviderSettingsRepository } from "../repositories/chrome-provide
 import { DeepSeekProvider } from "../providers/deepseek/deepseek-provider";
 import { ModelProviderRegistry } from "../providers/model-provider";
 import { registerPageContextBroadcasts } from "./page-context";
+import { IndexedDbStorageArea } from "../repositories/indexeddb-storage-area";
+import { MigratingPersistentStorageArea } from "../repositories/migrating-persistent-storage";
 
 const unknownRequestResponse = {
   ok: false as const,
   error: { code: "UNKNOWN" as const, message: "无法识别的插件请求。" }
 };
 
-const providerSettings = new ChromeProviderSettingsRepository(
-  chrome.storage.local,
-  chrome.storage.session
+const persistentStorage = new MigratingPersistentStorageArea(
+  new IndexedDbStorageArea(globalThis.indexedDB),
+  chrome.storage.local
 );
+const providerSettings = new ChromeProviderSettingsRepository(persistentStorage, chrome.storage.session);
 const providers = new ModelProviderRegistry([new DeepSeekProvider()]);
+
+// Trigger legacy-key cleanup as soon as the trusted service worker starts.
+void persistentStorage.get([]).catch(() => undefined);
 
 const controller = createBackgroundController({
   async getActiveTab() {
@@ -33,8 +39,8 @@ const controller = createBackgroundController({
 });
 
 chrome.runtime.onInstalled.addListener(async () => {
+  await persistentStorage.get([]).catch(() => undefined);
   await chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
-  await chrome.storage.local.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" });
   await chrome.storage.session.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" });
 });
 

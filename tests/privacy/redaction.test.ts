@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { redactCandidateDraft } from "../../src/shared/privacy";
+import {
+  prepareCandidateDraftForPreview,
+  redactCandidateDraft
+} from "../../src/shared/privacy";
 import type { CandidateDraft } from "../../src/shared/contracts/candidate";
 
 function candidateDraftWith(basics: string): CandidateDraft {
@@ -18,6 +21,47 @@ function candidateDraftWith(basics: string): CandidateDraft {
 }
 
 describe("candidate redaction", () => {
+  it("recognizes and redacts a bare name followed by age", () => {
+    // Break caught: the common `张三 32岁` basics layout could leak a name because it has no explicit 姓名 label.
+    const prepared = prepareCandidateDraftForPreview(candidateDraftWith("张三 32岁，现居上海"));
+
+    expect(prepared.draft.basics.text).toBe("候选人 32岁，现居上海");
+    expect(prepared.redactionContext).toMatchObject({
+      identityTokens: ["张三"],
+      identityDetection: "probable"
+    });
+  });
+
+  it("redacts a recognized identity token exhaustively in every candidate section", () => {
+    // Break caught: a name removed only from basics or person-predicate sentences could survive elsewhere in model input.
+    const draft = candidateDraftWith("姓名：张三，32岁");
+    draft.workExperience.text = "张三负责甲公司产品";
+    draft.projects.text = "项目负责人张三";
+    draft.education.text = "张三 北京大学本科";
+    draft.skills.text = "张三：SaaS";
+    draft.other.text = "推荐人提到张三";
+
+    const prepared = prepareCandidateDraftForPreview(draft);
+    const allText = Object.values(prepared.draft)
+      .filter((value): value is CandidateDraft["basics"] => typeof value === "object")
+      .map((section) => section.text)
+      .join(" ");
+
+    expect(allText).not.toContain("张三");
+    expect(allText.match(/候选人/gu)?.length).toBe(6);
+  });
+
+  it("re-redacts recruiter edits with transient identity tokens", () => {
+    // Break caught: users can paste the recognized name back into a preview after its first redaction.
+    const prepared = prepareCandidateDraftForPreview(candidateDraftWith("姓名：张三，32岁"));
+    const edited = structuredClone(prepared.draft);
+    edited.projects.text = "张三负责新项目，联系邮箱 new@example.com";
+
+    const submitted = redactCandidateDraft(edited, prepared.redactionContext);
+
+    expect(submitted.projects.text).toBe("候选人负责新项目，联系邮箱 [已移除]");
+    expect(submitted).not.toHaveProperty("redactionContext");
+  });
   it("removes direct identifiers without removing employment evidence", () => {
     // Break caught: direct identity/contact data could be sent to the model, or broad redaction could erase job evidence.
     const redacted = redactCandidateDraft(candidateDraftWith(
@@ -81,20 +125,20 @@ describe("candidate redaction", () => {
   });
 
   it.each([
-    "1、李小明品牌项目负责人",
-    "• 李小明零售业务增长",
-    "（李小明路负责区域招聘）",
-    "经历 | 李小明项目获得奖项",
-    "经历 李小明品牌项目负责人",
-    "• 大李小明曾任乙公司技术负责人"
-  ])("preserves a confirmed token without a person predicate in %s", (source) => {
-    // Break caught: widening left boundaries must not turn brand, location, or object phrases into person references.
+    ["1、李小明品牌项目负责人", "1、候选人品牌项目负责人"],
+    ["• 李小明零售业务增长", "• 候选人零售业务增长"],
+    ["（李小明路负责区域招聘）", "（候选人路负责区域招聘）"],
+    ["经历 | 李小明项目获得奖项", "经历 | 候选人项目获得奖项"],
+    ["经历 李小明品牌项目负责人", "经历 候选人品牌项目负责人"],
+    ["• 大李小明曾任乙公司技术负责人", "• 大候选人曾任乙公司技术负责人"]
+  ])("redacts a confirmed token even without a person predicate in %s", (source, expected) => {
+    // Break caught: context-sensitive replacement can miss a recognized identity token in an unexpected section layout.
     const draft = candidateDraftWith("姓名：李小明 年龄 31");
     draft.workExperience.text = source;
 
     const redacted = redactCandidateDraft(draft);
 
-    expect(redacted.workExperience.text).toBe(source);
+    expect(redacted.workExperience.text).toBe(expected);
   });
 
   it.each([
@@ -171,18 +215,18 @@ describe("candidate redaction", () => {
     }
   );
 
-  it("preserves an ambiguous leading employer brand and all employment evidence", () => {
-    // Break caught: a brand that resembles a personal name must not trigger global evidence deletion.
+  it("redacts a probable leading identity everywhere when it also resembles a brand", () => {
+    // Break caught: privacy must win after a token has been recognized; the user confirmation handles ambiguous extraction.
     const draft = candidateDraftWith("李宁，手机 13812345678");
     draft.workExperience.text = "曾负责李宁零售业务与渠道增长";
 
     const redacted = redactCandidateDraft(draft);
 
-    expect(redacted.workExperience.text).toBe("曾负责李宁零售业务与渠道增长");
+    expect(redacted.workExperience.text).toBe("曾负责候选人零售业务与渠道增长");
   });
 
-  it("redacts a strong-field leading identity only in basics and preserves the same token as evidence elsewhere", () => {
-    // Break caught: refusing all leading identity sources leaks a mandated name, while global replacement destroys brand evidence.
+  it("redacts a strong-field leading identity in basics and every later occurrence", () => {
+    // Break caught: a token recovered before preview must remain available for exhaustive submission-time redaction.
     const draft = candidateDraftWith("张三，手机 13812345678");
     draft.workExperience.text = "张三品牌项目负责人";
 
@@ -190,7 +234,7 @@ describe("candidate redaction", () => {
 
     expect(redacted.basics.text).toContain("候选人");
     expect(redacted.basics.text).not.toContain("张三");
-    expect(redacted.workExperience.text).toBe("张三品牌项目负责人");
+    expect(redacted.workExperience.text).toBe("候选人品牌项目负责人");
     expect(redacted.basics.text).not.toContain("13812345678");
   });
 });

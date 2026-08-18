@@ -1,6 +1,11 @@
 export type LiepinPageLocation = Pick<URL, "protocol" | "hostname" | "pathname">;
 
-const REVIEWED_CANDIDATE_DETAIL_PATH = /^\/candidate\/[^/]+\/?$/u;
+const REVIEWED_CANDIDATE_DETAIL_PATH = /^\/candidate\/([^/]+)\/?$/u;
+const NUMERIC_CANDIDATE_ID = /^[1-9]\d{5,19}$/u;
+const OPAQUE_CANDIDATE_ID = /^(?=.{12,64}$)(?=.*[A-Za-z])(?=.*\d)[A-Za-z0-9_-]+$/u;
+const RESERVED_CANDIDATE_SEGMENTS = new Set([
+  "search", "list", "index", "recommend", "recommended", "batch", "manage", "management"
+]);
 
 function toPageLocation(page: string | LiepinPageLocation): LiepinPageLocation | undefined {
   if (typeof page !== "string") return page;
@@ -26,5 +31,11 @@ export function isSupportedLiepinCandidateDetailPage(
   const hostname = location.hostname.toLowerCase().replace(/\.$/u, "");
   const isLiepinHost = hostname === "liepin.com" || hostname.endsWith(".liepin.com");
 
-  return isLiepinHost && REVIEWED_CANDIDATE_DETAIL_PATH.test(location.pathname);
+  const routeMatch = location.pathname.match(REVIEWED_CANDIDATE_DETAIL_PATH);
+  const candidateId = routeMatch?.[1];
+  if (!isLiepinHost || !candidateId || RESERVED_CANDIDATE_SEGMENTS.has(candidateId.toLowerCase())) {
+    return false;
+  }
+
+  return NUMERIC_CANDIDATE_ID.test(candidateId) || OPAQUE_CANDIDATE_ID.test(candidateId);
 }

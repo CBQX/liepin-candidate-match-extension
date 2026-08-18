@@ -1,5 +1,8 @@
 import { z } from "zod";
-import { candidateDraftSchema } from "./candidate";
+import {
+  candidateDraftSchema,
+  candidateRedactionContextSchema
+} from "./candidate";
 import { appErrorSchema } from "../errors";
 import { jobSchema } from "./job";
 
@@ -8,8 +11,14 @@ export const runtimeRequestSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("VALIDATE_PROVIDER") }),
   z.object({
     type: z.literal("ANALYZE_CANDIDATE"),
+    requestId: z.string().trim().min(1).max(128),
     job: jobSchema,
-    candidateDraft: candidateDraftSchema
+    candidateDraft: candidateDraftSchema,
+    redactionContext: candidateRedactionContextSchema
+  }),
+  z.object({
+    type: z.literal("CANCEL_ANALYSIS"),
+    requestId: z.string().trim().min(1).max(128)
   })
 ]);
 

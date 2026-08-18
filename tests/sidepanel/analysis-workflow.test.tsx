@@ -82,6 +82,7 @@ function createDependencies(analyzeCandidate: Analyze) {
     validateProvider: vi.fn(async () => ({ ok: true as const, data: { valid: true as const } })),
     extractCurrentCandidate: vi.fn(async () => ({ ok: true as const, data: candidateDraft })),
     analyzeCandidate: vi.fn<Analyze>(analyzeCandidate),
+    cancelAnalysis: vi.fn(async () => ({ ok: true as const, data: { cancelled: true } })),
     subscribeToPageContextChanges: vi.fn((listener: () => void) => {
       pageContextListener = listener;
       return () => {
@@ -95,6 +96,13 @@ function createDependencies(analyzeCandidate: Analyze) {
       pageContextListener?.();
     }
   };
+}
+
+async function confirmPrivacyAndAnalyze(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole("checkbox", {
+    name: /我已检查.*姓名.*联系方式.*猎聘 ID/u
+  }));
+  await user.click(screen.getByRole("button", { name: "确认并分析" }));
 }
 
 describe("analysis workflow", () => {
@@ -115,7 +123,7 @@ describe("analysis workflow", () => {
     expect(deps.analyzeCandidate).not.toHaveBeenCalled();
     expect(screen.queryByText("正在生成匹配分析…")).toBeNull();
 
-    await user.click(screen.getByRole("button", { name: "确认并分析" }));
+    await confirmPrivacyAndAnalyze(user);
     expect(await screen.findByText("正在生成匹配分析…")).toBeTruthy();
     expect(deps.analyzeCandidate).toHaveBeenCalledTimes(1);
     expect(deps.analyzeCandidate.mock.calls[0]?.[0]).toEqual(job);
@@ -157,7 +165,8 @@ describe("analysis workflow", () => {
     render(<App deps={deps} />);
 
     await user.click(await screen.findByRole("button", { name: "匹配分析" }));
-    await user.click(await screen.findByRole("button", { name: "确认并分析" }));
+    await screen.findByRole("button", { name: "确认并分析" });
+    await confirmPrivacyAndAnalyze(user);
 
     expect(await screen.findByText(message)).toBeTruthy();
     expect(screen.getAllByRole("button", { name: "重试分析" })).toHaveLength(1);
@@ -179,7 +188,8 @@ describe("analysis workflow", () => {
       render(<App deps={deps} />);
 
       await user.click(await screen.findByRole("button", { name: "匹配分析" }));
-      await user.click(await screen.findByRole("button", { name: "确认并分析" }));
+      await screen.findByRole("button", { name: "确认并分析" });
+      await confirmPrivacyAndAnalyze(user);
       await user.click(await screen.findByRole("button", { name: "重新配置模型" }));
 
       expect(await screen.findByLabelText("DeepSeek API Key")).toBeTruthy();
@@ -203,7 +213,7 @@ describe("analysis workflow", () => {
     fireEvent.change(await screen.findByLabelText("技能"), {
       target: { value: "SaaS、AI、QA-EDIT-RETAINED" }
     });
-    await user.click(screen.getByRole("button", { name: "确认并分析" }));
+    await confirmPrivacyAndAnalyze(user);
     await user.click(await screen.findByRole("button", { name: "重新配置模型" }));
 
     await user.type(await screen.findByLabelText("DeepSeek API Key"), "sk-recovered-test");
@@ -214,7 +224,7 @@ describe("analysis workflow", () => {
       .toBe("SaaS、AI、QA-EDIT-RETAINED");
     expect(deps.extractCurrentCandidate).toHaveBeenCalledTimes(1);
 
-    await user.click(screen.getByRole("button", { name: "确认并分析" }));
+    await confirmPrivacyAndAnalyze(user);
 
     expect(await screen.findByText("猎头结论")).toBeTruthy();
     expect(deps.analyzeCandidate).toHaveBeenCalledTimes(2);
@@ -230,11 +240,13 @@ describe("analysis workflow", () => {
     render(<App deps={deps} />);
 
     await user.click(await screen.findByRole("button", { name: "匹配分析" }));
-    await user.click(await screen.findByRole("button", { name: "确认并分析" }));
+    await screen.findByRole("button", { name: "确认并分析" });
+    await confirmPrivacyAndAnalyze(user);
     expect(await screen.findByText("正在生成匹配分析…")).toBeTruthy();
 
     act(() => deps.emitPageContextChanged());
     expect(await screen.findByRole("button", { name: "匹配分析" })).toBeTruthy();
+    expect(deps.cancelAnalysis).toHaveBeenCalledOnce();
 
     await act(async () => {
       pending.resolve({ ok: true, data: result });
@@ -256,13 +268,17 @@ describe("analysis workflow", () => {
     fireEvent.change(await screen.findByLabelText("技能"), {
       target: { value: "取消前已编辑：SaaS 与 AI" }
     });
-    await user.click(screen.getByRole("button", { name: "确认并分析" }));
+    await confirmPrivacyAndAnalyze(user);
     expect(await screen.findByText("正在生成匹配分析…")).toBeTruthy();
 
     await user.click(screen.getByRole("button", { name: "取消分析" }));
     expect(await screen.findByRole("button", { name: "确认并分析" })).toBeTruthy();
     expect((screen.getByLabelText("技能") as HTMLTextAreaElement).value)
       .toBe("取消前已编辑：SaaS 与 AI");
+    expect(deps.cancelAnalysis).toHaveBeenCalledOnce();
+    expect(deps.cancelAnalysis).toHaveBeenCalledWith(
+      deps.analyzeCandidate.mock.calls[0]?.[3]
+    );
 
     await act(async () => {
       pending.resolve({ ok: true, data: result });
@@ -272,5 +288,40 @@ describe("analysis workflow", () => {
     expect(screen.queryByText("猎头结论")).toBeNull();
     expect((screen.getByLabelText("技能") as HTMLTextAreaElement).value)
       .toBe("取消前已编辑：SaaS 与 AI");
+  });
+
+  it("cancels a running analysis when the recruiter starts adding a new job", async () => {
+    // Break caught: opening the new-job flow can hide progress while leaving a model request and identity context alive.
+    const pending = deferred<Awaited<ReturnType<Analyze>>>();
+    const deps = createDependencies(() => pending.promise);
+    const user = userEvent.setup();
+    render(<App deps={deps} />);
+
+    await user.click(await screen.findByRole("button", { name: "匹配分析" }));
+    await confirmPrivacyAndAnalyze(user);
+    expect(await screen.findByText("正在生成匹配分析…")).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "添加新岗位" }));
+
+    expect(await screen.findByLabelText("公司名称")).toBeTruthy();
+    expect(deps.cancelAnalysis).toHaveBeenCalledWith(
+      deps.analyzeCandidate.mock.calls[0]?.[3]
+    );
+  });
+
+  it("cancels a running analysis before the side-panel session unloads", async () => {
+    // Break caught: unload cleanup that only clears React state leaves the service-worker request running.
+    const pending = deferred<Awaited<ReturnType<Analyze>>>();
+    const deps = createDependencies(() => pending.promise);
+    const user = userEvent.setup();
+    render(<App deps={deps} />);
+
+    await user.click(await screen.findByRole("button", { name: "匹配分析" }));
+    await confirmPrivacyAndAnalyze(user);
+    fireEvent(window, new Event("beforeunload"));
+
+    await waitFor(() => expect(deps.cancelAnalysis).toHaveBeenCalledWith(
+      deps.analyzeCandidate.mock.calls[0]?.[3]
+    ));
   });
 });

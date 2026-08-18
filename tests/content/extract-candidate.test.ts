@@ -7,7 +7,7 @@ import { extractVisibleText } from "../../src/content/extract-visible-text";
 const fixture = (name: string) =>
   readFile(resolve(process.cwd(), "tests/content/fixtures", name), "utf8");
 
-const liepinUrl = new URL("https://www.liepin.com/candidate/fixture");
+const liepinUrl = new URL("https://www.liepin.com/candidate/123456789");
 
 describe("Liepin candidate extraction", () => {
   beforeEach(() => {
@@ -54,7 +54,7 @@ describe("Liepin candidate extraction", () => {
     document.body.innerHTML = "<h2>工作经历</h2><p>虚构内容</p>";
 
     expect(() =>
-      extractCandidate(document, new URL("https://notliepin.com/candidate/fixture"))
+      extractCandidate(document, new URL("https://notliepin.com/candidate/123456789"))
     ).toThrow("仅支持猎聘候选人页面");
   });
 
@@ -63,7 +63,10 @@ describe("Liepin candidate extraction", () => {
     "https://www.liepin.com/zhaopin/",
     "https://www.liepin.com/company/123",
     "https://www.liepin.com/job/456",
-    "https://www.liepin.com/candidate/"
+    "https://www.liepin.com/candidate/",
+    "https://www.liepin.com/candidate/search",
+    "https://www.liepin.com/candidate/list",
+    "https://www.liepin.com/candidate/fixture"
   ])("rejects non-detail Liepin page %s without visible-body fallback", (url) => {
     // Break caught: accepting any Liepin host would turn search/list/home/company
     // or job-page body text into a candidate draft.
@@ -74,8 +77,8 @@ describe("Liepin candidate extraction", () => {
   });
 
   it.each([
-    "https://www.liepin.com/candidate/fixture",
-    "https://www.liepin.com/candidate/fixture/?from=reviewed-test"
+    "https://www.liepin.com/candidate/123456789",
+    "https://www.liepin.com/candidate/cv_8F4p0Lm2Q7x9/?from=reviewed-test"
   ])("supports reviewed candidate-detail route %s", async (url) => {
     // Break caught: the shared eligibility predicate could reject the already
     // reviewed fixture route after centralization.
@@ -83,6 +86,14 @@ describe("Liepin candidate extraction", () => {
 
     expect(extractCandidate(document, new URL(url)).other.text)
       .toContain("没有标准标题");
+  });
+
+  it("rejects visible-body fallback without a single-profile DOM sentinel", () => {
+    // Break caught: a syntactically valid URL alone must not turn arbitrary page body text into candidate data.
+    document.body.innerHTML = "<main><p>搜索结果和推荐人选的可见文本</p></main>";
+
+    expect(() => extractCandidate(document, liepinUrl))
+      .toThrow("未识别到单个候选人详情内容");
   });
 });
 
@@ -104,7 +115,7 @@ describe("visible text extraction", () => {
 
 describe("content-script responder", () => {
   it("ignores unrelated messages and asynchronously returns the standard response", async () => {
-    document.body.innerHTML = "<h2>工作经历</h2><p>2024 年至今，负责虚构产品的需求分析与交付。</p>";
+    document.body.innerHTML = "<main data-liepin-candidate-profile><h2>工作经历</h2><p>2024 年至今，负责虚构产品的需求分析与交付。</p></main>";
     type ContentListener = (
       request: unknown,
       sender: chrome.runtime.MessageSender,
@@ -113,7 +124,7 @@ describe("content-script responder", () => {
     const listeners: ContentListener[] = [];
     const addListener = vi.fn((listener: ContentListener) => listeners.push(listener));
     vi.stubGlobal("chrome", { runtime: { onMessage: { addListener } } });
-    vi.stubGlobal("location", new URL("https://www.liepin.com/candidate/fixture"));
+    vi.stubGlobal("location", new URL("https://www.liepin.com/candidate/123456789"));
     vi.resetModules();
 
     await import("../../src/content/index");

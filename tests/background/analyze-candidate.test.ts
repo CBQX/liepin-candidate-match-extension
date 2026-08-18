@@ -2,7 +2,11 @@ import { describe, expect, it, vi } from "vitest";
 import { analyzeCandidate } from "../../src/background/analyze-candidate";
 import { createBackgroundController } from "../../src/background/controller";
 import type { ModelProvider } from "../../src/providers/model-provider";
-import { redactCandidateDraft } from "../../src/shared/privacy";
+import {
+  detectCandidateRedactionContext,
+  prepareCandidateDraftForPreview,
+  redactCandidateDraft
+} from "../../src/shared/privacy";
 import type { CandidateDraft } from "../../src/shared/contracts/candidate";
 import type { Job } from "../../src/shared/contracts/job";
 import type { ModelMatchResult } from "../../src/shared/contracts/matching";
@@ -61,9 +65,24 @@ const settings = {
 function providerWithAnalyze(analyze: ModelProvider["analyze"]): ModelProvider {
   return {
     id: "deepseek",
-    models: ["deepseek-v4-flash", "deepseek-v4-pro"],
+    models: [
+      { id: "deepseek-v4-flash", label: "DeepSeek V4 Flash" },
+      { id: "deepseek-v4-pro", label: "DeepSeek V4 Pro" }
+    ],
     validateCredentials: vi.fn(),
     analyze
+  };
+}
+
+const redactionContext = detectCandidateRedactionContext(candidateDraft.basics.text);
+
+function analysisRuntimeRequest(requestId = "analysis-test") {
+  return {
+    type: "ANALYZE_CANDIDATE" as const,
+    requestId,
+    job,
+    candidateDraft,
+    redactionContext
   };
 }
 
@@ -72,7 +91,11 @@ describe("analyzeCandidate", () => {
     // Break caught: bypassing any pipeline stage could leak identifiers, omit rules, revive deterministic location matching, or return an uncomposed score.
     const analyze = vi.fn<ModelProvider["analyze"]>().mockResolvedValue(modelResult);
 
-    const analysis = await analyzeCandidate({ job, candidateDraft }, {
+    const analysis = await analyzeCandidate({
+      job,
+      candidateDraft,
+      redactionContext: detectCandidateRedactionContext(candidateDraft.basics.text)
+    }, {
       provider: providerWithAnalyze(analyze),
       settings,
       redact: redactCandidateDraft
@@ -92,7 +115,7 @@ describe("analyzeCandidate", () => {
     expect(input.ruleEvaluations).toEqual([
       { criterionId: "custom-1", status: "unknown", evidence: [] },
       { criterionId: "custom-2", status: "met", evidence: ["明确学历：本科"] },
-      { criterionId: "jd-1", status: "met", evidence: ["明确工作经验：8 年"] }
+      { criterionId: "jd-1", status: "met", evidence: ["工作经历：明确 8 年工作经验"] }
     ]);
     expect(analysis).toMatchObject({
       overallScore: 80,
@@ -102,11 +125,33 @@ describe("analyzeCandidate", () => {
     });
   });
 
+  it("re-redacts a recognized name added after preview and never forwards redaction metadata", async () => {
+    // Break caught: the background trust boundary must sanitize recruiter edits without exposing identity metadata to a provider.
+    const analyze = vi.fn<ModelProvider["analyze"]>().mockResolvedValue(modelResult);
+    const prepared = prepareCandidateDraftForPreview(candidateDraft);
+    const edited = structuredClone(prepared.draft);
+    edited.projects.text = "张三负责新增项目";
+
+    await analyzeCandidate({
+      job,
+      candidateDraft: edited,
+      redactionContext: prepared.redactionContext
+    }, {
+      provider: providerWithAnalyze(analyze),
+      settings,
+      redact: redactCandidateDraft
+    });
+
+    const providerInput = analyze.mock.calls[0]?.[0];
+    expect(JSON.stringify(providerInput)).not.toContain("张三");
+    expect(providerInput).not.toHaveProperty("redactionContext");
+  });
+
   it("rejects a missing API key before invoking the provider", async () => {
     // Break caught: forwarding an empty credential would make an avoidable external request and obscure the setup action.
     const analyze = vi.fn<ModelProvider["analyze"]>().mockResolvedValue(modelResult);
 
-    await expect(analyzeCandidate({ job, candidateDraft }, {
+    await expect(analyzeCandidate({ job, candidateDraft, redactionContext }, {
       provider: providerWithAnalyze(analyze),
       settings: { ...settings, apiKey: "  " },
       redact: redactCandidateDraft
@@ -138,7 +183,11 @@ describe("analyzeCandidate", () => {
       }
     };
 
-    await analyzeCandidate({ job, candidateDraft: draftWithPlatformIdentifiers }, {
+    await analyzeCandidate({
+      job,
+      candidateDraft: draftWithPlatformIdentifiers,
+      redactionContext: detectCandidateRedactionContext(draftWithPlatformIdentifiers.basics.text)
+    }, {
       provider: providerWithAnalyze(analyze),
       settings,
       redact: redactCandidateDraft
@@ -168,11 +217,7 @@ describe("ANALYZE_CANDIDATE controller response", () => {
       resolveProvider: () => provider
     });
 
-    const response = await controller.handle({
-      type: "ANALYZE_CANDIDATE",
-      job,
-      candidateDraft
-    });
+    const response = await controller.handle(analysisRuntimeRequest());
 
     expect(response).toMatchObject({
       ok: false,
@@ -194,11 +239,7 @@ describe("ANALYZE_CANDIDATE controller response", () => {
       resolveProvider: () => provider
     });
 
-    const response = await controller.handle({
-      type: "ANALYZE_CANDIDATE",
-      job,
-      candidateDraft
-    });
+    const response = await controller.handle(analysisRuntimeRequest());
 
     expect(response).toMatchObject({
       ok: false,
@@ -223,11 +264,7 @@ describe("ANALYZE_CANDIDATE controller response", () => {
       resolveProvider: () => provider
     });
 
-    const response = await controller.handle({
-      type: "ANALYZE_CANDIDATE",
-      job,
-      candidateDraft
-    });
+    const response = await controller.handle(analysisRuntimeRequest());
 
     expect(response).toMatchObject({
       ok: false,
@@ -253,11 +290,7 @@ describe("ANALYZE_CANDIDATE controller response", () => {
       resolveProvider: () => providerWithAnalyze(vi.fn().mockResolvedValue(evidenceFreeResult))
     });
 
-    const response = await controller.handle({
-      type: "ANALYZE_CANDIDATE",
-      job,
-      candidateDraft
-    });
+    const response = await controller.handle(analysisRuntimeRequest());
 
     expect(response).toMatchObject({
       ok: false,
@@ -276,11 +309,7 @@ describe("ANALYZE_CANDIDATE controller response", () => {
       resolveProvider
     });
 
-    const response = await controller.handle({
-      type: "ANALYZE_CANDIDATE",
-      job,
-      candidateDraft
-    });
+    const response = await controller.handle(analysisRuntimeRequest());
 
     expect(response).toMatchObject({ ok: false, error: { code: "MISSING_API_KEY" } });
     expect(resolveProvider).not.toHaveBeenCalled();
@@ -295,11 +324,7 @@ describe("ANALYZE_CANDIDATE controller response", () => {
       resolveProvider: () => undefined
     });
 
-    const response = await controller.handle({
-      type: "ANALYZE_CANDIDATE",
-      job,
-      candidateDraft
-    });
+    const response = await controller.handle(analysisRuntimeRequest());
 
     expect(response).toMatchObject({
       ok: false,
@@ -319,11 +344,7 @@ describe("ANALYZE_CANDIDATE controller response", () => {
       resolveProvider
     });
 
-    const response = await controller.handle({
-      type: "ANALYZE_CANDIDATE",
-      job,
-      candidateDraft
-    });
+    const response = await controller.handle(analysisRuntimeRequest());
 
     expect(response).toMatchObject({
       ok: false,
