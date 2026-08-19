@@ -20,7 +20,7 @@ export const jobCriterionSchema = z.object({
   id: requiredText,
   text: requiredText,
   priority: z.enum(["hard", "preferred", "standard"]),
-  source: z.enum(["custom", "jd"])
+  source: z.enum(["custom", "jd", "profile"])
 });
 
 export type JobCriterion = z.infer<typeof jobCriterionSchema>;

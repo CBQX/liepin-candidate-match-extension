@@ -23,6 +23,19 @@ const evidenceBackedModelResult = {
 };
 
 describe("runtime contracts", () => {
+  it("accepts a legacy job without a recruitment profile", () => {
+    const parsed = jobSchema.parse({
+      id: "legacy-job",
+      company: "虚构甲公司",
+      jd: "负责虚构企业软件产品",
+      customRequirements: "企业软件经验优先",
+      createdAt: "2026-08-18T00:00:00.000Z",
+      updatedAt: "2026-08-18T00:00:00.000Z"
+    });
+
+    expect(parsed.recruitmentProfile).toBeUndefined();
+  });
+
   it("rejects a job with any blank required field", () => {
     expect(jobSchema.safeParse({
       id: "job-1",
