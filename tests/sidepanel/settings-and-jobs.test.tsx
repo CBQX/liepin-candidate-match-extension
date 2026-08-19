@@ -6,6 +6,10 @@ import type { SidePanelDependencies } from "../../src/sidepanel/app-dependencies
 import type { CandidateDraft } from "../../src/shared/contracts/candidate";
 import type { Job } from "../../src/shared/contracts/job";
 import type { ProviderSettings } from "../../src/repositories/chrome-provider-settings";
+import type {
+  ModelRecruitmentProfile,
+  ConfirmedRecruitmentProfile
+} from "../../src/shared/contracts/recruitment-profile";
 
 afterEach(() => {
   cleanup();
@@ -18,11 +22,34 @@ const settings: ProviderSettings = {
   apiKey: "sk-saved"
 };
 
+const modelProfile: ModelRecruitmentProfile = {
+  version: 1,
+  roleTitle: "企业软件产品经理",
+  roleObjective: "负责虚构企业软件产品规划",
+  requirements: [{
+    id: "profile-requirement-1",
+    text: "具备企业软件产品经验",
+    priority: "hard",
+    dimensionId: "functional_expertise",
+    weight: 100,
+    jobEvidence: ["岗位要求企业软件产品经验"]
+  }],
+  acceptableAlternatives: [],
+  ambiguities: [],
+  verificationQuestions: []
+};
+
+const confirmedProfile: ConfirmedRecruitmentProfile = {
+  ...modelProfile,
+  confirmedAt: "2026-08-19T00:00:00.000Z"
+};
+
 const jobA: Job = {
   id: "job-a",
   company: "甲公司",
   jd: "负责企业招聘",
   customRequirements: "有 SaaS 经验",
+  recruitmentProfile: confirmedProfile,
   createdAt: "2026-08-18T00:00:00.000Z",
   updatedAt: "2026-08-18T00:00:00.000Z"
 };
@@ -79,12 +106,34 @@ function createFakeDependencies(initial: {
   const extractCurrentCandidate = vi.fn<SidePanelDependencies["extractCurrentCandidate"]>(
     async () => ({ ok: true as const, data: candidateDraft })
   );
+  const generateJobProfile = vi.fn<SidePanelDependencies["generateJobProfile"]>(
+    async () => ({ ok: true as const, data: modelProfile })
+  );
+  const confirmJobProfile = vi.fn<SidePanelDependencies["confirmJobProfile"]>(
+    async (jobId, profile) => {
+      const existing = jobs.find((job) => job.id === jobId)!;
+      const updated: Job = {
+        ...existing,
+        recruitmentProfile: {
+          ...profile,
+          confirmedAt: "2026-08-19T00:00:00.000Z"
+        },
+        updatedAt: "2026-08-19T00:00:00.000Z"
+      };
+      jobs = [...jobs.filter((job) => job.id !== jobId), updated];
+      activeJobId = jobId;
+      return { ok: true as const, data: updated };
+    }
+  );
 
   return {
     providerSettings,
     jobs: jobRepository,
     validateProvider,
     extractCurrentCandidate,
+    generateJobProfile,
+    cancelJobProfile: vi.fn(async () => ({ ok: true as const, data: { cancelled: true } })),
+    confirmJobProfile,
     analyzeCandidate: vi.fn(async () => ({
       ok: false as const,
       error: { code: "UNKNOWN" as const, message: "测试中未配置分析结果。" }
@@ -161,7 +210,7 @@ describe("side-panel jobs", () => {
     const user = userEvent.setup();
     render(<App deps={deps} />);
 
-    await user.click(await screen.findByRole("button", { name: "保存岗位" }));
+    await user.click(await screen.findByRole("button", { name: "分析岗位要求" }));
 
     expect(screen.getByText("请输入公司名称")).toBeTruthy();
     expect(screen.getByText("请输入职位 JD")).toBeTruthy();
@@ -173,7 +222,9 @@ describe("side-panel jobs", () => {
     // Break caught: replacing the job list or failing to activate a selection would analyze against stale context.
     vi.stubGlobal("crypto", { randomUUID: vi.fn()
       .mockReturnValueOnce("job-created-a")
-      .mockReturnValueOnce("job-created-b") });
+      .mockReturnValueOnce("profile-created-a")
+      .mockReturnValueOnce("job-created-b")
+      .mockReturnValueOnce("profile-created-b") });
     const deps = createFakeDependencies({ settings });
     const user = userEvent.setup();
     render(<App deps={deps} />);
@@ -181,9 +232,11 @@ describe("side-panel jobs", () => {
     await user.type(await screen.findByLabelText("公司名称"), "甲公司");
     await user.type(screen.getByLabelText("职位 JD"), "负责招聘系统");
     await user.type(screen.getByLabelText("个性化要求"), "熟悉 SaaS");
-    await user.click(screen.getByRole("button", { name: "保存岗位" }));
+    await user.click(screen.getByRole("button", { name: "分析岗位要求" }));
 
-    expect(await screen.findByText("岗位已就绪，可以开始浏览候选人")).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "确认招聘关键要求" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "确认岗位画像" }));
+    expect(await screen.findByText("岗位画像已确认，可以开始浏览候选人")).toBeTruthy();
     expect(deps.extractCurrentCandidate).not.toHaveBeenCalled();
     await user.click(screen.getByRole("button", { name: "添加新岗位" }));
     expect((screen.getByLabelText("公司名称") as HTMLInputElement).value).toBe("");
@@ -191,7 +244,8 @@ describe("side-panel jobs", () => {
     await user.type(screen.getByLabelText("公司名称"), "乙公司");
     await user.type(screen.getByLabelText("职位 JD"), "负责数据平台");
     await user.type(screen.getByLabelText("个性化要求"), "熟悉 AI");
-    await user.click(screen.getByRole("button", { name: "保存岗位" }));
+    await user.click(screen.getByRole("button", { name: "分析岗位要求" }));
+    await user.click(await screen.findByRole("button", { name: "确认岗位画像" }));
 
     const selector = await screen.findByRole("combobox", { name: "当前岗位" }) as HTMLSelectElement;
     expect([...selector.options].map((option) => option.text)).toEqual(["甲公司", "乙公司"]);
@@ -205,6 +259,69 @@ describe("side-panel jobs", () => {
       expect(selector.value).toBe("job-created-a");
     });
     expect(deps.extractCurrentCandidate).not.toHaveBeenCalled();
+  });
+
+  it("generates a review draft after saving and persists only after one confirmation", async () => {
+    vi.stubGlobal("crypto", { randomUUID: vi.fn()
+      .mockReturnValueOnce("new-job")
+      .mockReturnValueOnce("profile-request") });
+    const deps = createFakeDependencies({ settings });
+    const user = userEvent.setup();
+    render(<App deps={deps} />);
+
+    await user.type(await screen.findByLabelText("公司名称"), "虚构甲公司");
+    await user.type(screen.getByLabelText("职位 JD"), "负责虚构企业软件产品");
+    await user.type(screen.getByLabelText("个性化要求"), "重视复杂业务理解");
+    await user.click(screen.getByRole("button", { name: "分析岗位要求" }));
+
+    expect(await screen.findByRole("heading", { name: "确认招聘关键要求" })).toBeTruthy();
+    expect(deps.generateJobProfile).toHaveBeenCalledTimes(1);
+    expect(deps.confirmJobProfile).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "确认岗位画像" }));
+
+    await waitFor(() => expect(deps.confirmJobProfile).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText("岗位画像已确认，可以开始浏览候选人")).toBeTruthy();
+    expect(deps.extractCurrentCandidate).not.toHaveBeenCalled();
+  });
+
+  it("requires profile generation for a legacy saved job before candidate analysis", async () => {
+    const legacyJob: Job = { ...jobA, recruitmentProfile: undefined };
+    const deps = createFakeDependencies({
+      settings,
+      jobs: [legacyJob],
+      activeJobId: legacyJob.id
+    });
+    const user = userEvent.setup();
+    render(<App deps={deps} />);
+
+    expect(await screen.findByRole("heading", { name: "需要生成岗位画像" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "匹配分析" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "分析岗位要求" }));
+    expect(deps.generateJobProfile).toHaveBeenCalledTimes(1);
+    expect(deps.extractCurrentCandidate).not.toHaveBeenCalled();
+  });
+
+  it("keeps the confirmed profile usable when an explicit reanalysis fails", async () => {
+    vi.stubGlobal("crypto", { randomUUID: vi.fn(() => "replacement-profile-request") });
+    const deps = createFakeDependencies({
+      settings,
+      jobs: [jobA],
+      activeJobId: jobA.id
+    });
+    deps.generateJobProfile.mockResolvedValueOnce({
+      ok: false,
+      error: { code: "NETWORK_FAILED", message: "无法连接模型服务，请重试。" }
+    });
+    const user = userEvent.setup();
+    render(<App deps={deps} />);
+
+    await user.click(await screen.findByRole("button", { name: "重新分析岗位" }));
+
+    expect(await screen.findByRole("heading", { name: "本次岗位分析未完成" })).toBeTruthy();
+    expect(deps.confirmJobProfile).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "继续使用当前画像" }));
+    expect(await screen.findByText("岗位画像已确认，可以开始浏览候选人")).toBeTruthy();
   });
 
   it("extracts only after the explicit match-analysis action", async () => {

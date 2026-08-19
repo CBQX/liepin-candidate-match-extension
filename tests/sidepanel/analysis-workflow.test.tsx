@@ -112,6 +112,15 @@ function createDependencies(analyzeCandidate: Analyze) {
     },
     validateProvider: vi.fn(async () => ({ ok: true as const, data: { valid: true as const } })),
     extractCurrentCandidate: vi.fn(async () => ({ ok: true as const, data: candidateDraft })),
+    generateJobProfile: vi.fn(async () => ({
+      ok: true as const,
+      data: {
+        ...job.recruitmentProfile!,
+        confirmedAt: undefined
+      }
+    })),
+    cancelJobProfile: vi.fn(async () => ({ ok: true as const, data: { cancelled: true } })),
+    confirmJobProfile: vi.fn(async () => ({ ok: true as const, data: job })),
     analyzeCandidate: vi.fn<Analyze>(analyzeCandidate),
     cancelAnalysis: vi.fn(async () => ({ ok: true as const, data: { cancelled: true } })),
     subscribeToPageContextChanges: vi.fn((listener: () => void) => {

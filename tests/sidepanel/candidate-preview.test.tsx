@@ -14,6 +14,23 @@ const jobA: Job = {
   company: "甲公司",
   jd: "负责企业招聘",
   customRequirements: "有 SaaS 经验",
+  recruitmentProfile: {
+    version: 1,
+    roleTitle: "虚构产品经理",
+    roleObjective: "负责虚构产品",
+    requirements: [{
+      id: "profile-requirement",
+      text: "具备企业软件产品经验",
+      priority: "standard",
+      dimensionId: "functional_expertise",
+      weight: 100,
+      jobEvidence: ["岗位要求企业软件产品经验"]
+    }],
+    acceptableAlternatives: [],
+    ambiguities: [],
+    verificationQuestions: [],
+    confirmedAt: "2026-08-19T00:00:00.000Z"
+  },
   createdAt: "2026-08-18T00:00:00.000Z",
   updatedAt: "2026-08-18T00:00:00.000Z"
 };
@@ -67,6 +84,15 @@ function createDependencies() {
     },
     validateProvider: vi.fn(async () => ({ ok: true as const, data: { valid: true as const } })),
     extractCurrentCandidate,
+    generateJobProfile: vi.fn(async () => ({
+      ok: true as const,
+      data: {
+        ...jobA.recruitmentProfile!,
+        confirmedAt: undefined
+      }
+    })),
+    cancelJobProfile: vi.fn(async () => ({ ok: true as const, data: { cancelled: true } })),
+    confirmJobProfile: vi.fn(async () => ({ ok: true as const, data: jobA })),
     analyzeCandidate: vi.fn(async () => ({
       ok: false as const,
       error: { code: "UNKNOWN" as const, message: "测试中未配置分析结果。" }

@@ -7,6 +7,7 @@ import type { ProviderSettings } from "../../src/repositories/chrome-provider-se
 import type { CandidateDraft } from "../../src/shared/contracts/candidate";
 import type { Job } from "../../src/shared/contracts/job";
 import type { MatchAnalysis } from "../../src/shared/contracts/matching";
+import type { ModelRecruitmentProfile } from "../../src/shared/contracts/recruitment-profile";
 
 afterEach(() => {
   cleanup();
@@ -61,6 +62,23 @@ const analysis: MatchAnalysis = {
   recruiterConclusion: "建议优先沟通并核实到岗时间。"
 };
 
+const generatedProfile: ModelRecruitmentProfile = {
+  version: 1,
+  roleTitle: "企业软件产品经理",
+  roleObjective: "负责虚构企业软件产品",
+  requirements: [{
+    id: "profile-requirement",
+    text: "具备企业软件产品经验",
+    priority: "hard",
+    dimensionId: "functional_expertise",
+    weight: 100,
+    jobEvidence: ["岗位要求企业软件产品经验"]
+  }],
+  acceptableAlternatives: [],
+  ambiguities: [],
+  verificationQuestions: []
+};
+
 function createWorkflowDependencies() {
   let savedSettings: ProviderSettings | undefined;
   let jobs: Job[] = [];
@@ -95,6 +113,18 @@ function createWorkflowDependencies() {
       ok: true as const,
       data: extractedCandidate
     })),
+    generateJobProfile: vi.fn(async () => ({ ok: true as const, data: generatedProfile })),
+    cancelJobProfile: vi.fn(async () => ({ ok: true as const, data: { cancelled: true } })),
+    confirmJobProfile: vi.fn(async (jobId: string, profile: ModelRecruitmentProfile) => {
+      const existing = jobs.find((job) => job.id === jobId)!;
+      const updated: Job = {
+        ...existing,
+        recruitmentProfile: { ...profile, confirmedAt: "2026-08-19T00:00:00.000Z" }
+      };
+      jobs = [...jobs.filter((job) => job.id !== jobId), updated];
+      activeJobId = jobId;
+      return { ok: true as const, data: updated };
+    }),
     analyzeCandidate: vi.fn<SidePanelDependencies["analyzeCandidate"]>(
       async () => ({ ok: true as const, data: analysis })
     ),
@@ -114,7 +144,8 @@ async function saveJob(
   await user.type(screen.getByLabelText("公司名称"), company);
   await user.type(screen.getByLabelText("职位 JD"), jd);
   await user.type(screen.getByLabelText("个性化要求"), customRequirements);
-  await user.click(screen.getByRole("button", { name: "保存岗位" }));
+  await user.click(screen.getByRole("button", { name: "分析岗位要求" }));
+  await user.click(await screen.findByRole("button", { name: "确认岗位画像" }));
 }
 
 describe("complete recruiter workflow", () => {
@@ -124,7 +155,9 @@ describe("complete recruiter workflow", () => {
     vi.stubGlobal("crypto", {
       randomUUID: vi.fn()
         .mockReturnValueOnce("job-one")
+        .mockReturnValueOnce("profile-one")
         .mockReturnValueOnce("job-two")
+        .mockReturnValueOnce("profile-two")
         .mockReturnValueOnce("analysis-one")
     });
     const deps = createWorkflowDependencies();
@@ -141,7 +174,7 @@ describe("complete recruiter workflow", () => {
       "负责招聘 SaaS 产品；岗位包含团队管理职责",
       "必须本科；希望尽快到岗"
     );
-    expect(await screen.findByText("岗位已就绪，可以开始浏览候选人")).toBeTruthy();
+    expect(await screen.findByText("岗位画像已确认，可以开始浏览候选人")).toBeTruthy();
 
     await user.click(screen.getByRole("button", { name: "添加新岗位" }));
     await saveJob(user, "乙公司", "负责数据平台产品", "必须有 AI 项目经验");
@@ -164,7 +197,7 @@ describe("complete recruiter workflow", () => {
 
     expect(await screen.findByRole("heading", { name: "甲公司 · 人选匹配报告" })).toBeTruthy();
     expect(screen.getByText("86")).toBeTruthy();
-    expect(screen.getByText("强推荐")).toBeTruthy();
+    expect(screen.getByText("建议优先联系")).toBeTruthy();
     expect(screen.getByRole("heading", { name: "匹配项" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "不匹配项" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "风险提示" })).toBeTruthy();

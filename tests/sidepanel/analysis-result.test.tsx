@@ -15,6 +15,30 @@ const job: Job = {
   company: "甲公司",
   jd: "负责企业软件产品",
   customRequirements: "必须本科\n必须工作地点：上海",
+  recruitmentProfile: {
+    version: 1,
+    roleTitle: "企业软件产品经理",
+    roleObjective: "负责虚构企业软件产品",
+    requirements: [{
+      id: "custom-1",
+      text: "必须本科",
+      priority: "hard",
+      dimensionId: "hard_requirements",
+      weight: 50,
+      jobEvidence: ["必须本科"]
+    }, {
+      id: "custom-2",
+      text: "必须工作地点：上海",
+      priority: "hard",
+      dimensionId: "hard_requirements",
+      weight: 50,
+      jobEvidence: ["必须工作地点：上海"]
+    }],
+    acceptableAlternatives: [],
+    ambiguities: [],
+    verificationQuestions: [],
+    confirmedAt: "2026-08-19T00:00:00.000Z"
+  },
   createdAt: "2026-08-18T00:00:00.000Z",
   updatedAt: "2026-08-18T00:00:00.000Z"
 };
@@ -66,7 +90,7 @@ describe("AnalysisResult", () => {
     render(<AnalysisResult analysis={analysis} job={job} />);
 
     expect(screen.getByText("78")).toBeTruthy();
-    expect(screen.getByText("建议推进")).toBeTruthy();
+    expect(screen.getByText("建议联系")).toBeTruthy();
     expect(screen.getByText("中可信")).toBeTruthy();
 
     for (const label of [
@@ -99,7 +123,7 @@ describe("AnalysisResult", () => {
       "阶段 C 中，地点、工作年限和证书仅供模型分析与猎头核实；这三类在确定性硬条件核对中始终显示“未知”。"
     )).toBeTruthy();
     expect(screen.getByText(
-      "自然语言履历可能包含范围、否定、计划或有效期语义，因此不用于自动满足、淘汰或降级。"
+      "自然语言履历可能包含范围、否定、计划或有效期语义，因此不用于自动满足或影响联系建议。"
     )).toBeTruthy();
 
     const claimEvidence = [

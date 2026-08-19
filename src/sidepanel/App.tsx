@@ -4,6 +4,10 @@ import type { ProviderSettings } from "../repositories/chrome-provider-settings"
 import { candidateDraftSchema } from "../shared/contracts/candidate";
 import type { Job } from "../shared/contracts/job";
 import { matchAnalysisSchema } from "../shared/contracts/matching";
+import {
+  modelRecruitmentProfileSchema,
+  type ModelRecruitmentProfile
+} from "../shared/contracts/recruitment-profile";
 import type { AppError } from "../shared/errors";
 import { prepareCandidateDraftForPreview } from "../shared/privacy";
 import {
@@ -17,6 +21,9 @@ import { AnalysisProgress } from "./components/AnalysisProgress";
 import { AnalysisResult } from "./components/AnalysisResult";
 import { JobForm } from "./components/JobForm";
 import { JobSelector } from "./components/JobSelector";
+import { JobProfileNeeded } from "./components/JobProfileNeeded";
+import { JobProfileProgress } from "./components/JobProfileProgress";
+import { JobProfileReview } from "./components/JobProfileReview";
 import { ModelSettingsForm } from "./components/ModelSettingsForm";
 import { ReadyState } from "./components/ReadyState";
 
@@ -37,18 +44,30 @@ export function App({ deps }: AppProps) {
   const [extractionError, setExtractionError] = useState<AppError>();
   const [analysisError, setAnalysisError] = useState<AppError>();
   const [analyzing, setAnalyzing] = useState(false);
+  const [profileAnalyzing, setProfileAnalyzing] = useState(false);
+  const [profileDraft, setProfileDraft] = useState<ModelRecruitmentProfile>();
+  const [profileError, setProfileError] = useState<AppError>();
   const [analysisSession, dispatchAnalysisSession] = useReducer(
     analysisSessionReducer,
     analysisSessionInitialState
   );
   const extractionGeneration = useRef(0);
   const activeAnalysisRequestId = useRef<string | undefined>(undefined);
+  const profileGeneration = useRef(0);
+  const activeProfileRequestId = useRef<string | undefined>(undefined);
 
   function sendCancellationForActiveRequest() {
     const requestId = activeAnalysisRequestId.current;
     if (!requestId) return;
     activeAnalysisRequestId.current = undefined;
     void deps.cancelAnalysis(requestId).catch(() => undefined);
+  }
+
+  function sendCancellationForActiveProfileRequest() {
+    const requestId = activeProfileRequestId.current;
+    if (!requestId) return;
+    activeProfileRequestId.current = undefined;
+    void deps.cancelJobProfile(requestId).catch(() => undefined);
   }
 
   useEffect(() => {
@@ -96,7 +115,9 @@ export function App({ deps }: AppProps) {
 
     return () => {
       sendCancellationForActiveRequest();
+      sendCancellationForActiveProfileRequest();
       extractionGeneration.current += 1;
+      profileGeneration.current += 1;
       unsubscribe();
       window.removeEventListener("beforeunload", endSession);
     };
@@ -122,16 +143,22 @@ export function App({ deps }: AppProps) {
   async function saveJob(input: CreateJobInput) {
     try {
       sendCancellationForActiveRequest();
+      sendCancellationForActiveProfileRequest();
       extractionGeneration.current += 1;
+      profileGeneration.current += 1;
       dispatchAnalysisSession({ type: "JOB_CHANGED" });
       setExtractionError(undefined);
       setAnalysisError(undefined);
       setAnalyzing(false);
+      setProfileDraft(undefined);
+      setProfileError(undefined);
+      setProfileAnalyzing(false);
       const savedJob = await new JobService(deps.jobs).createAndActivate(input);
       setJobs(await deps.jobs.list());
       setActiveJob(savedJob);
       setAddingJob(false);
       setSetupState("ready");
+      await startJobProfileGeneration(savedJob);
       return undefined;
     } catch {
       return "岗位保存失败，请重试。";
@@ -145,10 +172,15 @@ export function App({ deps }: AppProps) {
     setSwitchingJob(true);
     extractionGeneration.current += 1;
     sendCancellationForActiveRequest();
+    sendCancellationForActiveProfileRequest();
+    profileGeneration.current += 1;
     dispatchAnalysisSession({ type: "JOB_CHANGED" });
     setExtractionError(undefined);
     setAnalysisError(undefined);
     setAnalyzing(false);
+    setProfileAnalyzing(false);
+    setProfileDraft(undefined);
+    setProfileError(undefined);
     try {
       await deps.jobs.activate(id);
       setActiveJob(selectedJob);
@@ -158,6 +190,73 @@ export function App({ deps }: AppProps) {
       setSwitchError("岗位切换失败，请重试。");
     } finally {
       setSwitchingJob(false);
+    }
+  }
+
+  async function startJobProfileGeneration(job: Job) {
+    sendCancellationForActiveProfileRequest();
+    const requestGeneration = profileGeneration.current + 1;
+    profileGeneration.current = requestGeneration;
+    const requestId = crypto.randomUUID();
+    activeProfileRequestId.current = requestId;
+    setProfileDraft(undefined);
+    setProfileError(undefined);
+    setProfileAnalyzing(true);
+
+    try {
+      const response = await deps.generateJobProfile(job, requestId);
+      if (requestGeneration !== profileGeneration.current) return;
+      if (!response.ok) {
+        setProfileError(response.error);
+        return;
+      }
+      const parsed = modelRecruitmentProfileSchema.safeParse(response.data);
+      if (!parsed.success) {
+        setProfileError({
+          code: "INVALID_MODEL_OUTPUT",
+          message: "岗位画像内容无法验证，请重试。"
+        });
+        return;
+      }
+      setProfileDraft(parsed.data);
+    } catch {
+      if (requestGeneration !== profileGeneration.current) return;
+      setProfileError({
+        code: "UNKNOWN",
+        message: "岗位画像分析失败，请检查网络后重试。"
+      });
+    } finally {
+      if (activeProfileRequestId.current === requestId) {
+        activeProfileRequestId.current = undefined;
+      }
+      if (requestGeneration === profileGeneration.current) {
+        setProfileAnalyzing(false);
+      }
+    }
+  }
+
+  function cancelJobProfileGeneration() {
+    sendCancellationForActiveProfileRequest();
+    profileGeneration.current += 1;
+    setProfileAnalyzing(false);
+    setProfileError(undefined);
+    setProfileDraft(undefined);
+  }
+
+  async function confirmJobProfile(profile: ModelRecruitmentProfile) {
+    if (!activeJob) return "未找到当前岗位，请重试。";
+    try {
+      const response = await deps.confirmJobProfile(activeJob.id, profile);
+      if (!response.ok) return response.error.message;
+      const updatedJobs = await deps.jobs.list();
+      setJobs(updatedJobs);
+      setActiveJob(response.data);
+      setProfileDraft(undefined);
+      setProfileError(undefined);
+      dispatchAnalysisSession({ type: "JOB_CHANGED" });
+      return undefined;
+    } catch {
+      return "岗位画像保存失败，请重试。";
     }
   }
 
@@ -258,11 +357,16 @@ export function App({ deps }: AppProps) {
 
   function beginAddingJob() {
     sendCancellationForActiveRequest();
+    sendCancellationForActiveProfileRequest();
     extractionGeneration.current += 1;
+    profileGeneration.current += 1;
     dispatchAnalysisSession({ type: "JOB_CHANGED" });
     setExtractionError(undefined);
     setAnalysisError(undefined);
     setAnalyzing(false);
+    setProfileAnalyzing(false);
+    setProfileDraft(undefined);
+    setProfileError(undefined);
     setSwitchError("");
     setAddingJob(true);
   }
@@ -270,6 +374,9 @@ export function App({ deps }: AppProps) {
   const reconfigurationError = analysisError?.code === "MISSING_API_KEY"
     || analysisError?.code === "INVALID_API_KEY"
     || analysisError?.code === "INVALID_PROVIDER_SETTINGS";
+  const profileReconfigurationError = profileError?.code === "MISSING_API_KEY"
+    || profileError?.code === "INVALID_API_KEY"
+    || profileError?.code === "INVALID_PROVIDER_SETTINGS";
 
   return (
     <main className="app-shell">
@@ -298,7 +405,43 @@ export function App({ deps }: AppProps) {
         <JobForm onSave={saveJob} />
       )}
       {!loadError && setupState === "ready" && !addingJob && activeJob && (
-        analysisSession.result ? (
+        profileAnalyzing ? (
+          <JobProfileProgress onCancel={cancelJobProfileGeneration} />
+        ) : profileDraft ? (
+          <JobProfileReview
+            profile={profileDraft}
+            onConfirm={confirmJobProfile}
+            onRegenerate={() => void startJobProfileGeneration(activeJob)}
+          />
+        ) : profileError ? (
+          <section className="panel-card error-card" aria-labelledby="profile-failure-title" role="alert">
+            <p className="eyebrow">岗位分析未完成</p>
+            <h2 id="profile-failure-title">
+              {profileReconfigurationError ? "需要重新配置模型" : "本次岗位分析未完成"}
+            </h2>
+            <p className="muted">{profileError.message}</p>
+            <button
+              className="primary-button"
+              type="button"
+              onClick={() => {
+                if (profileReconfigurationError) {
+                  setSetupState("needs_model");
+                } else {
+                  void startJobProfileGeneration(activeJob);
+                }
+              }}
+            >
+              {profileReconfigurationError ? "重新配置模型" : "重试岗位分析"}
+            </button>
+            {activeJob.recruitmentProfile && (
+              <button className="text-button" type="button" onClick={() => setProfileError(undefined)}>
+                继续使用当前画像
+              </button>
+            )}
+          </section>
+        ) : !activeJob.recruitmentProfile ? (
+          <JobProfileNeeded job={activeJob} onAnalyze={() => void startJobProfileGeneration(activeJob)} />
+        ) : analysisSession.result ? (
           <AnalysisResult analysis={analysisSession.result} job={activeJob} />
         ) : analyzing ? (
           <AnalysisProgress onCancel={cancelCurrentAnalysis} />
@@ -338,7 +481,11 @@ export function App({ deps }: AppProps) {
         ) : extractionError ? (
           <ErrorState error={extractionError} onRetry={() => void matchAnalysis()} />
         ) : (
-          <ReadyState activeJob={activeJob} onMatchAnalysis={matchAnalysis} />
+          <ReadyState
+            activeJob={activeJob}
+            onMatchAnalysis={matchAnalysis}
+            onRegenerateProfile={() => void startJobProfileGeneration(activeJob)}
+          />
         )
       )}
     </main>

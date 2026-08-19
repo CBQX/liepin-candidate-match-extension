@@ -12,6 +12,7 @@ import type {
 } from "../shared/contracts/candidate";
 import type { Job } from "../shared/contracts/job";
 import type { MatchAnalysis } from "../shared/contracts/matching";
+import type { ModelRecruitmentProfile } from "../shared/contracts/recruitment-profile";
 import {
   pageContextChangedEventSchema,
   type RuntimeResponse
@@ -28,6 +29,15 @@ export interface SidePanelDependencies {
   jobs: JobRepository;
   validateProvider(): Promise<RuntimeResponse<{ valid: true }>>;
   extractCurrentCandidate(): Promise<RuntimeResponse<CandidateDraft>>;
+  generateJobProfile(
+    job: Job,
+    requestId: string
+  ): Promise<RuntimeResponse<ModelRecruitmentProfile>>;
+  cancelJobProfile(requestId: string): Promise<RuntimeResponse<{ cancelled: boolean }>>;
+  confirmJobProfile(
+    jobId: string,
+    profile: ModelRecruitmentProfile
+  ): Promise<RuntimeResponse<Job>>;
   analyzeCandidate(
     job: Job,
     candidateDraft: CandidateDraft,
@@ -52,6 +62,15 @@ export const appDependencies: SidePanelDependencies = {
   },
   extractCurrentCandidate() {
     return chrome.runtime.sendMessage({ type: "EXTRACT_CURRENT_CANDIDATE" });
+  },
+  generateJobProfile(job, requestId) {
+    return chrome.runtime.sendMessage({ type: "GENERATE_JOB_PROFILE", job, requestId });
+  },
+  cancelJobProfile(requestId) {
+    return chrome.runtime.sendMessage({ type: "CANCEL_JOB_PROFILE", requestId });
+  },
+  confirmJobProfile(jobId, profile) {
+    return chrome.runtime.sendMessage({ type: "CONFIRM_JOB_PROFILE", jobId, profile });
   },
   analyzeCandidate(job, candidateDraft, redactionContext, requestId) {
     return chrome.runtime.sendMessage({

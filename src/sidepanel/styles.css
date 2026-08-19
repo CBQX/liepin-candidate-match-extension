@@ -135,6 +135,10 @@ textarea[aria-invalid="true"] {
   border-color: #ba443b;
 }
 
+select[aria-invalid="true"] {
+  border-color: #ba443b;
+}
+
 .checkbox-row {
   display: flex !important;
   align-items: center;
@@ -292,6 +296,52 @@ select:disabled {
 
 .analysis-progress .secondary-button {
   width: 100%;
+}
+
+.profile-review,
+.profile-requirements {
+  display: grid;
+  gap: 14px;
+}
+
+.profile-requirement {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  border: 1px solid #dce4d7;
+  border-radius: 10px;
+  padding: 13px;
+}
+
+.profile-requirement legend {
+  padding: 0 6px;
+  color: #337044;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.profile-requirement-controls {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+
+.danger-text-button,
+.text-button {
+  min-height: 34px;
+  border: 0;
+  background: transparent;
+  font-weight: 700;
+}
+
+.danger-text-button {
+  justify-self: start;
+  padding: 0;
+  color: #a8342f;
+}
+
+.text-button {
+  color: #2d613d;
 }
 
 .progress-spinner {

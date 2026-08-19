@@ -38,7 +38,7 @@ export function JobForm({ onSave }: JobFormProps) {
     <section className="panel-card" aria-labelledby="job-form-title">
       <p className="eyebrow">岗位设置</p>
       <h2 id="job-form-title">添加新岗位</h2>
-      <p className="muted">这三项会作为每次候选人匹配的判断依据。</p>
+      <p className="muted">AI 会先提炼招聘关键要求，待你确认后再用于候选人评分。</p>
 
       <form className="form-stack" noValidate onSubmit={handleSubmit}>
         <label>
@@ -83,7 +83,7 @@ export function JobForm({ onSave }: JobFormProps) {
 
         {submitError && <p className="form-error" role="alert">{submitError}</p>}
         <button className="primary-button" type="submit" disabled={submitting}>
-          {submitting ? "正在保存…" : "保存岗位"}
+          {submitting ? "正在分析…" : "分析岗位要求"}
         </button>
       </form>
     </section>

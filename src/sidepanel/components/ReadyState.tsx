@@ -4,9 +4,10 @@ import type { Job } from "../../shared/contracts/job";
 interface ReadyStateProps {
   activeJob: Job;
   onMatchAnalysis(): Promise<string | undefined>;
+  onRegenerateProfile(): void;
 }
 
-export function ReadyState({ activeJob, onMatchAnalysis }: ReadyStateProps) {
+export function ReadyState({ activeJob, onMatchAnalysis, onRegenerateProfile }: ReadyStateProps) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
@@ -25,7 +26,7 @@ export function ReadyState({ activeJob, onMatchAnalysis }: ReadyStateProps) {
     <section className="panel-card ready-card" aria-labelledby="ready-title">
       <div className="ready-mark" aria-hidden="true">✓</div>
       <p className="eyebrow">当前岗位 · {activeJob.company}</p>
-      <h2 id="ready-title">岗位已就绪，可以开始浏览候选人</h2>
+      <h2 id="ready-title">岗位画像已确认，可以开始浏览候选人</h2>
       <p className="muted">在猎聘打开候选人详情页后，再由你手动开始匹配。</p>
       {error && <p className="form-error" role="alert">{error}</p>}
       <button
@@ -35,6 +36,9 @@ export function ReadyState({ activeJob, onMatchAnalysis }: ReadyStateProps) {
         onClick={handleMatchAnalysis}
       >
         {submitting ? "正在读取…" : "匹配分析"}
+      </button>
+      <button className="text-button" type="button" onClick={onRegenerateProfile}>
+        重新分析岗位
       </button>
     </section>
   );

@@ -11,10 +11,10 @@ import {
 } from "../../shared/contracts/matching";
 
 const recommendationLabels: Record<MatchAnalysis["recommendation"], string> = {
-  strong_recommend: "强推荐",
-  recommend: "建议推进",
-  cautious: "谨慎推进",
-  not_recommend: "暂不推荐"
+  strong_recommend: "建议优先联系",
+  recommend: "建议联系",
+  cautious: "建议核实后联系",
+  not_recommend: "暂不优先联系"
 };
 
 const confidenceLabels: Record<MatchAnalysis["confidence"], string> = {
@@ -131,7 +131,7 @@ export function AnalysisResult({ analysis, job }: AnalysisResultProps) {
             阶段 C 中，地点、工作年限和证书仅供模型分析与猎头核实；这三类在确定性硬条件核对中始终显示“未知”。
           </p>
           <p className="muted">
-            自然语言履历可能包含范围、否定、计划或有效期语义，因此不用于自动满足、淘汰或降级。
+            自然语言履历可能包含范围、否定、计划或有效期语义，因此不用于自动满足或影响联系建议。
           </p>
         </div>
         {analysis.hardRequirements.length === 0 ? (
