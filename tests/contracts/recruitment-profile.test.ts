@@ -75,6 +75,15 @@ describe("recruitment profile contracts", () => {
     }
   );
 
+  it.each([
+    { field: "roleTitle", value: "只招男性的产品经理" },
+    { field: "roleObjective", value: "优先筛选 35 岁以下候选人" },
+    { field: "acceptableAlternatives", value: ["女性候选人可放宽经验要求"] },
+    { field: "verificationQuestions", value: ["请确认婚育情况"] }
+  ] as const)("rejects protected characteristics outside requirements: $field", ({ field, value }) => {
+    expect(modelRecruitmentProfileSchema.safeParse({ ...profile, [field]: value }).success).toBe(false);
+  });
+
   it("confirms a normalized profile with a trusted timestamp", () => {
     const confirmed = confirmRecruitmentProfile(profile, "2026-08-19T01:00:00.000Z");
 

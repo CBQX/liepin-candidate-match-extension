@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "../../src/sidepanel/App";
@@ -8,6 +8,7 @@ import type { CandidateDraft } from "../../src/shared/contracts/candidate";
 import type { Job } from "../../src/shared/contracts/job";
 import type { MatchAnalysis } from "../../src/shared/contracts/matching";
 import type { ModelRecruitmentProfile } from "../../src/shared/contracts/recruitment-profile";
+import { syntheticRecruitmentScenarios } from "../fixtures/synthetic-recruitment";
 
 afterEach(() => {
   cleanup();
@@ -79,10 +80,23 @@ const generatedProfile: ModelRecruitmentProfile = {
   verificationQuestions: []
 };
 
-function createWorkflowDependencies() {
-  let savedSettings: ProviderSettings | undefined;
-  let jobs: Job[] = [];
-  let activeJobId: string | undefined;
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((nextResolve) => {
+    resolve = nextResolve;
+  });
+  return { promise, resolve };
+}
+
+function createWorkflowDependencies(initial: {
+  settings?: ProviderSettings;
+  jobs?: Job[];
+  activeJobId?: string;
+} = {}) {
+  let savedSettings: ProviderSettings | undefined = initial.settings;
+  let jobs: Job[] = [...(initial.jobs ?? [])];
+  let activeJobId: string | undefined = initial.activeJobId;
+  let pageContextListener: (() => void) | undefined;
 
   const dependencies = {
     providerSettings: {
@@ -113,7 +127,9 @@ function createWorkflowDependencies() {
       ok: true as const,
       data: extractedCandidate
     })),
-    generateJobProfile: vi.fn(async () => ({ ok: true as const, data: generatedProfile })),
+    generateJobProfile: vi.fn<SidePanelDependencies["generateJobProfile"]>(
+      async () => ({ ok: true as const, data: generatedProfile })
+    ),
     cancelJobProfile: vi.fn(async () => ({ ok: true as const, data: { cancelled: true } })),
     confirmJobProfile: vi.fn(async (jobId: string, profile: ModelRecruitmentProfile) => {
       const existing = jobs.find((job) => job.id === jobId)!;
@@ -129,10 +145,20 @@ function createWorkflowDependencies() {
       async () => ({ ok: true as const, data: analysis })
     ),
     cancelAnalysis: vi.fn(async () => ({ ok: true as const, data: { cancelled: true } })),
-    subscribeToPageContextChanges: vi.fn(() => () => undefined)
+    subscribeToPageContextChanges: vi.fn((listener: () => void) => {
+      pageContextListener = listener;
+      return () => {
+        pageContextListener = undefined;
+      };
+    })
   } satisfies SidePanelDependencies;
 
-  return dependencies;
+  return {
+    ...dependencies,
+    emitPageContextChanged() {
+      pageContextListener?.();
+    }
+  };
 }
 
 async function saveJob(
@@ -141,7 +167,7 @@ async function saveJob(
   jd: string,
   customRequirements: string
 ) {
-  await user.type(screen.getByLabelText("公司名称"), company);
+  await user.type(await screen.findByLabelText("公司名称"), company);
   await user.type(screen.getByLabelText("职位 JD"), jd);
   await user.type(screen.getByLabelText("个性化要求"), customRequirements);
   await user.click(screen.getByRole("button", { name: "分析岗位要求" }));
@@ -219,5 +245,188 @@ describe("complete recruiter workflow", () => {
     expect(screen.queryByDisplayValue("SaaS、产品规划、AI 工作流")).toBeNull();
     expect(screen.getByRole("button", { name: "匹配分析" })).toBeTruthy();
     expect(screen.getByText("当前岗位 · 乙公司")).toBeTruthy();
+  });
+
+  it("generates and confirms once, then reuses the profile for two candidates", async () => {
+    vi.stubGlobal("crypto", { randomUUID: vi.fn()
+      .mockReturnValueOnce("synthetic-job-enterprise")
+      .mockReturnValueOnce("profile-request-once")
+      .mockReturnValueOnce("candidate-request-one")
+      .mockReturnValueOnce("candidate-request-two") });
+    const deps = createWorkflowDependencies({
+      settings: {
+        providerId: "deepseek",
+        model: "deepseek-v4-pro",
+        apiKey: "sk-synthetic"
+      }
+    });
+    const user = userEvent.setup();
+    render(<App deps={deps} />);
+    const syntheticJob = syntheticRecruitmentScenarios.enterpriseSoftware.job;
+
+    await saveJob(user, syntheticJob.company, syntheticJob.jd, syntheticJob.customRequirements);
+    expect(await screen.findByText("岗位画像已确认，可以开始浏览候选人")).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "匹配分析" }));
+    await user.click(await screen.findByRole("checkbox", {
+      name: /我已检查.*姓名.*联系方式.*猎聘 ID/u
+    }));
+    await user.click(screen.getByRole("button", { name: "确认并分析" }));
+    expect(await screen.findByRole("heading", { name: "虚构甲公司 · 人选匹配报告" })).toBeTruthy();
+
+    act(() => deps.emitPageContextChanged());
+    await user.click(await screen.findByRole("button", { name: "匹配分析" }));
+    await user.click(await screen.findByRole("checkbox", {
+      name: /我已检查.*姓名.*联系方式.*猎聘 ID/u
+    }));
+    await user.click(screen.getByRole("button", { name: "确认并分析" }));
+    expect(await screen.findByRole("heading", { name: "虚构甲公司 · 人选匹配报告" })).toBeTruthy();
+
+    expect(deps.generateJobProfile).toHaveBeenCalledTimes(1);
+    expect(deps.confirmJobProfile).toHaveBeenCalledTimes(1);
+    expect(deps.analyzeCandidate).toHaveBeenCalledTimes(2);
+  });
+
+  it("retains the saved raw job after invalid credentials are reconfigured", async () => {
+    vi.stubGlobal("crypto", { randomUUID: vi.fn()
+      .mockReturnValueOnce("raw-job")
+      .mockReturnValueOnce("profile-invalid-key") });
+    const deps = createWorkflowDependencies({
+      settings: {
+        providerId: "deepseek",
+        model: "deepseek-v4-pro",
+        apiKey: "sk-expired"
+      }
+    });
+    deps.generateJobProfile.mockResolvedValueOnce({
+      ok: false,
+      error: { code: "INVALID_API_KEY", message: "模型 API Key 无效，请检查后重试。" }
+    });
+    const user = userEvent.setup();
+    render(<App deps={deps} />);
+
+    const syntheticJob = syntheticRecruitmentScenarios.dataPlatform.job;
+    await user.type(await screen.findByLabelText("公司名称"), syntheticJob.company);
+    await user.type(screen.getByLabelText("职位 JD"), syntheticJob.jd);
+    await user.type(screen.getByLabelText("个性化要求"), syntheticJob.customRequirements);
+    await user.click(screen.getByRole("button", { name: "分析岗位要求" }));
+    await user.click(await screen.findByRole("button", { name: "重新配置模型" }));
+
+    await user.type(await screen.findByLabelText("DeepSeek API Key"), "sk-reconfigured");
+    await user.click(screen.getByRole("button", { name: "验证并保存" }));
+
+    expect(await screen.findByRole("heading", { name: "需要生成岗位画像" })).toBeTruthy();
+    expect(await deps.jobs.getActive()).toMatchObject(syntheticJob);
+    expect(deps.confirmJobProfile).not.toHaveBeenCalled();
+  });
+
+  it("retries a failed profile request without recreating the raw job", async () => {
+    vi.stubGlobal("crypto", { randomUUID: vi.fn()
+      .mockReturnValueOnce("retry-job")
+      .mockReturnValueOnce("profile-request-failed")
+      .mockReturnValueOnce("profile-request-retry") });
+    const deps = createWorkflowDependencies({
+      settings: {
+        providerId: "deepseek",
+        model: "deepseek-v4-pro",
+        apiKey: "sk-synthetic"
+      }
+    });
+    deps.generateJobProfile
+      .mockResolvedValueOnce({
+        ok: false,
+        error: { code: "NETWORK_FAILED", message: "无法连接模型服务，请重试。" }
+      })
+      .mockResolvedValueOnce({ ok: true, data: generatedProfile });
+    const user = userEvent.setup();
+    render(<App deps={deps} />);
+    const syntheticJob = syntheticRecruitmentScenarios.overseasProduct.job;
+
+    await user.type(await screen.findByLabelText("公司名称"), syntheticJob.company);
+    await user.type(screen.getByLabelText("职位 JD"), syntheticJob.jd);
+    await user.type(screen.getByLabelText("个性化要求"), syntheticJob.customRequirements);
+    await user.click(screen.getByRole("button", { name: "分析岗位要求" }));
+    await user.click(await screen.findByRole("button", { name: "重试岗位分析" }));
+
+    expect(await screen.findByRole("heading", { name: "确认招聘关键要求" })).toBeTruthy();
+    expect(deps.generateJobProfile).toHaveBeenCalledTimes(2);
+    expect(deps.jobs.saveAndActivate).toHaveBeenCalledTimes(1);
+  });
+
+  it("cancels profile generation and ignores a late result", async () => {
+    vi.stubGlobal("crypto", { randomUUID: vi.fn()
+      .mockReturnValueOnce("cancelled-job")
+      .mockReturnValueOnce("cancelled-profile-request") });
+    const deps = createWorkflowDependencies({
+      settings: {
+        providerId: "deepseek",
+        model: "deepseek-v4-pro",
+        apiKey: "sk-synthetic"
+      }
+    });
+    const pending = deferred<Awaited<ReturnType<SidePanelDependencies["generateJobProfile"]>>>();
+    deps.generateJobProfile.mockReturnValueOnce(pending.promise);
+    const user = userEvent.setup();
+    render(<App deps={deps} />);
+    const syntheticJob = syntheticRecruitmentScenarios.enterpriseSoftware.job;
+
+    await user.type(await screen.findByLabelText("公司名称"), syntheticJob.company);
+    await user.type(screen.getByLabelText("职位 JD"), syntheticJob.jd);
+    await user.type(screen.getByLabelText("个性化要求"), syntheticJob.customRequirements);
+    await user.click(screen.getByRole("button", { name: "分析岗位要求" }));
+    await user.click(await screen.findByRole("button", { name: "取消岗位分析" }));
+
+    expect(deps.cancelJobProfile).toHaveBeenCalledWith("cancelled-profile-request");
+    await act(async () => {
+      pending.resolve({ ok: true, data: generatedProfile });
+      await pending.promise;
+    });
+    expect(await screen.findByRole("heading", { name: "需要生成岗位画像" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "确认招聘关键要求" })).toBeNull();
+  });
+
+  it("isolates a pending profile request when switching jobs", async () => {
+    vi.stubGlobal("crypto", { randomUUID: vi.fn(() => "switch-profile-request") });
+    const legacyJob: Job = {
+      id: "legacy-job",
+      ...syntheticRecruitmentScenarios.overseasProduct.job,
+      createdAt: "2026-08-18T00:00:00.000Z",
+      updatedAt: "2026-08-18T00:00:00.000Z"
+    };
+    const readyJob: Job = {
+      id: "ready-job",
+      ...syntheticRecruitmentScenarios.dataPlatform.job,
+      recruitmentProfile: {
+        ...generatedProfile,
+        confirmedAt: "2026-08-19T00:00:00.000Z"
+      },
+      createdAt: "2026-08-18T00:00:00.000Z",
+      updatedAt: "2026-08-19T00:00:00.000Z"
+    };
+    const deps = createWorkflowDependencies({
+      settings: {
+        providerId: "deepseek",
+        model: "deepseek-v4-pro",
+        apiKey: "sk-synthetic"
+      },
+      jobs: [legacyJob, readyJob],
+      activeJobId: legacyJob.id
+    });
+    const pending = deferred<Awaited<ReturnType<SidePanelDependencies["generateJobProfile"]>>>();
+    deps.generateJobProfile.mockReturnValueOnce(pending.promise);
+    const user = userEvent.setup();
+    render(<App deps={deps} />);
+
+    await user.click(await screen.findByRole("button", { name: "分析岗位要求" }));
+    await user.selectOptions(screen.getByRole("combobox", { name: "当前岗位" }), readyJob.id);
+
+    await waitFor(() => expect(deps.cancelJobProfile).toHaveBeenCalledWith("switch-profile-request"));
+    await act(async () => {
+      pending.resolve({ ok: true, data: generatedProfile });
+      await pending.promise;
+    });
+    expect(await screen.findByText("当前岗位 · 虚构丙公司")).toBeTruthy();
+    expect(screen.getByText("岗位画像已确认，可以开始浏览候选人")).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "确认招聘关键要求" })).toBeNull();
   });
 });

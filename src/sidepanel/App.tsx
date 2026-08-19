@@ -132,6 +132,8 @@ export function App({ deps }: AppProps) {
         await deps.providerSettings.clear();
         return response.error.message;
       }
+      setAnalysisError(undefined);
+      setProfileError(undefined);
       setSetupState(activeJob ? "ready" : "needs_job");
       return undefined;
     } catch {

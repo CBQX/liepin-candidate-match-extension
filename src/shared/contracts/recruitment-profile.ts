@@ -2,7 +2,7 @@ import { z } from "zod";
 import { dimensionIds } from "./matching";
 
 const requiredText = z.string().trim().min(1);
-const protectedCriterion = /年龄|性别|男性|女性|男士|女士|民族|汉族|婚姻|已婚|未婚|婚育|生育|怀孕/u;
+const protectedCriterion = /年龄|\d+\s*(?:周)?岁|性别|男性|女性|男士|女士|民族|汉族|婚姻|已婚|未婚|婚育|生育|怀孕/u;
 
 export const recruitmentRequirementSchema = z.object({
   id: requiredText,
@@ -27,6 +27,22 @@ const rejectProtectedRecruitmentCriteria = (
   profile: z.infer<z.ZodObject<typeof recruitmentProfileShape>>,
   context: z.RefinementCtx
 ) => {
+  const profileFields = [
+    ["roleTitle", profile.roleTitle],
+    ["roleObjective", profile.roleObjective],
+    ["acceptableAlternatives", profile.acceptableAlternatives.join(" ")],
+    ["ambiguities", profile.ambiguities.join(" ")],
+    ["verificationQuestions", profile.verificationQuestions.join(" ")]
+  ] as const;
+  profileFields.forEach(([field, text]) => {
+    if (protectedCriterion.test(text)) {
+      context.addIssue({
+        code: "custom",
+        path: [field],
+        message: "岗位画像不得包含受保护的个人特征"
+      });
+    }
+  });
   profile.requirements.forEach((requirement, index) => {
     if (protectedCriterion.test([requirement.text, ...requirement.jobEvidence].join(" "))) {
       context.addIssue({

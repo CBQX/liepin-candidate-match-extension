@@ -94,8 +94,16 @@ export function JobProfileReview({ profile, onConfirm, onRegenerate }: JobProfil
     if (!parsed.success) {
       const nextErrors: ProfileErrors = { requirementText: {} };
       for (const issue of parsed.error.issues) {
-        if (issue.path[0] === "roleTitle") nextErrors.roleTitle = "请输入岗位名称";
-        if (issue.path[0] === "roleObjective") nextErrors.roleObjective = "请输入岗位目标";
+        if (issue.path[0] === "roleTitle") {
+          nextErrors.roleTitle = issue.message.includes("受保护")
+            ? issue.message
+            : "请输入岗位名称";
+        }
+        if (issue.path[0] === "roleObjective") {
+          nextErrors.roleObjective = issue.message.includes("受保护")
+            ? issue.message
+            : "请输入岗位目标";
+        }
         if (issue.path[0] === "requirements" && typeof issue.path[1] !== "number") {
           nextErrors.requirements = "请至少保留一条招聘要求";
         }

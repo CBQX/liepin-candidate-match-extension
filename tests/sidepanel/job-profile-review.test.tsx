@@ -116,6 +116,20 @@ describe("JobProfileReview", () => {
     expect(onConfirm).not.toHaveBeenCalled();
   });
 
+  it("explains protected characteristics in the editable profile summary", async () => {
+    const onConfirm = vi.fn(async () => undefined);
+    const user = userEvent.setup();
+    render(<JobProfileReview profile={modelProfile} onConfirm={onConfirm} onRegenerate={vi.fn()} />);
+
+    const title = screen.getByLabelText("岗位名称");
+    await user.clear(title);
+    await user.type(title, "只招男性的产品经理");
+    await user.click(screen.getByRole("button", { name: "确认岗位画像" }));
+
+    expect(screen.getByText("岗位画像不得包含受保护的个人特征")).toBeTruthy();
+    expect(onConfirm).not.toHaveBeenCalled();
+  });
+
   it("retains edited fields when confirmation storage fails", async () => {
     const onConfirm = vi.fn(async () => "岗位画像保存失败，请重试。");
     const user = userEvent.setup();
