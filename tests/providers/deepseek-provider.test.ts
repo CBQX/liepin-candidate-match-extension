@@ -91,6 +91,7 @@ const modelResult: ModelMatchResult = {
   }],
   concerns: [],
   verificationQuestions: ["请核实团队协作范围"],
+  conclusionHighlights: ["核心经验匹配", "核实团队协作范围"],
   recruiterConclusion: "建议联系并核实团队协作范围"
 };
 

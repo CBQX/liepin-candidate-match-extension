@@ -1,7 +1,8 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "../../src/sidepanel/App";
+import { JobSelector } from "../../src/sidepanel/components/JobSelector";
 import type { SidePanelDependencies } from "../../src/sidepanel/app-dependencies";
 import type { CandidateDraft } from "../../src/shared/contracts/candidate";
 import type { Job } from "../../src/shared/contracts/job";
@@ -57,7 +58,11 @@ const jobA: Job = {
 const jobB: Job = {
   ...jobA,
   id: "job-b",
-  company: "乙公司"
+  company: "乙公司",
+  recruitmentProfile: {
+    ...confirmedProfile,
+    roleTitle: "数据平台产品经理"
+  }
 };
 
 const candidateDraft: CandidateDraft = {
@@ -206,6 +211,65 @@ describe("side-panel model settings", () => {
   });
 });
 
+describe("two-line job selector", () => {
+  it("shows role before company and switches jobs with listbox keyboard controls", async () => {
+    // Break caught: falling back to a native single-line company select would hide the role context.
+    const onChange = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <JobSelector
+        jobs={[jobA, jobB]}
+        activeJobId={jobA.id}
+        onChange={onChange}
+        onAdd={vi.fn()}
+      />
+    );
+
+    const trigger = screen.getByRole("combobox", { name: "当前岗位" });
+    const roleTitle = within(trigger).getByText("企业软件产品经理");
+    const company = within(trigger).getByText("甲公司");
+    expect(roleTitle.compareDocumentPosition(company) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    await user.click(trigger);
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByRole("option", { name: /企业软件产品经理.*甲公司/u })
+      .getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByRole("option", { name: /数据平台产品经理.*乙公司/u })
+      .getAttribute("aria-selected")).toBe("false");
+
+    await user.keyboard("{ArrowDown}{Enter}");
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenCalledWith(jobB.id);
+    expect(screen.queryByRole("listbox")).toBeNull();
+  });
+
+  it("closes with Escape without switching and labels a legacy job conservatively", async () => {
+    // Break caught: Escape must not activate a highlighted job, and missing profiles must not invent a title from JD text.
+    const legacyJob: Job = { ...jobA, recruitmentProfile: undefined };
+    const onChange = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <JobSelector
+        jobs={[legacyJob, jobB]}
+        activeJobId={legacyJob.id}
+        onChange={onChange}
+        onAdd={vi.fn()}
+      />
+    );
+
+    const trigger = screen.getByRole("combobox", { name: "当前岗位" });
+    expect(within(trigger).getByText("待确认岗位")).toBeTruthy();
+    expect(within(trigger).getByText("甲公司")).toBeTruthy();
+
+    await user.click(trigger);
+    await user.keyboard("{ArrowDown}{Escape}");
+
+    expect(onChange).not.toHaveBeenCalled();
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByRole("listbox")).toBeNull();
+  });
+});
+
 describe("side-panel jobs", () => {
   it("requires company, JD, and custom requirements", async () => {
     // Break caught: accepting any blank field would create a job that cannot drive a complete analysis.
@@ -250,16 +314,21 @@ describe("side-panel jobs", () => {
     await user.click(screen.getByRole("button", { name: "分析岗位要求" }));
     await user.click(await screen.findByRole("button", { name: "确认岗位画像" }));
 
-    const selector = await screen.findByRole("combobox", { name: "当前岗位" }) as HTMLSelectElement;
-    expect([...selector.options].map((option) => option.text)).toEqual(["甲公司", "乙公司"]);
-    expect(selector.value).toBe("job-created-b");
+    const selector = await screen.findByRole("combobox", { name: "当前岗位" });
+    expect(within(selector).getByText("乙公司")).toBeTruthy();
+    await user.click(selector);
+    expect(screen.getAllByRole("option").map((option) => option.textContent)).toEqual([
+      "企业软件产品经理甲公司",
+      "企业软件产品经理乙公司✓"
+    ]);
+    expect(screen.getByRole("option", { name: /乙公司/u }).getAttribute("aria-selected")).toBe("true");
     expect(deps.extractCurrentCandidate).not.toHaveBeenCalled();
 
-    await user.selectOptions(selector, "job-created-a");
+    await user.click(screen.getByRole("option", { name: /甲公司/u }));
 
     await waitFor(() => {
       expect(deps.jobs.activate).toHaveBeenCalledWith("job-created-a");
-      expect(selector.value).toBe("job-created-a");
+      expect(within(selector).getByText("甲公司")).toBeTruthy();
     });
     expect(deps.extractCurrentCandidate).not.toHaveBeenCalled();
   });
@@ -340,7 +409,8 @@ describe("side-panel jobs", () => {
     const selector = await screen.findByRole("combobox", { name: "当前岗位" });
     expect(deps.extractCurrentCandidate).not.toHaveBeenCalled();
 
-    await user.selectOptions(selector, jobB.id);
+    await user.click(selector);
+    await user.click(screen.getByRole("option", { name: /数据平台产品经理.*乙公司/u }));
     await waitFor(() => expect(deps.jobs.activate).toHaveBeenCalledWith(jobB.id));
     expect(deps.extractCurrentCandidate).not.toHaveBeenCalled();
 
@@ -359,12 +429,17 @@ describe("side-panel jobs", () => {
     const user = userEvent.setup();
     render(<App deps={deps} />);
 
-    const selector = await screen.findByRole("combobox", { name: "当前岗位" }) as HTMLSelectElement;
-    await user.selectOptions(selector, jobB.id);
+    const selector = await screen.findByRole("combobox", { name: "当前岗位" });
+    await user.click(selector);
+    await user.click(screen.getByRole("option", { name: /数据平台产品经理.*乙公司/u }));
 
     expect(await screen.findByText("岗位切换失败，请重试。")).toBeTruthy();
-    expect(selector.value).toBe(jobA.id);
-    expect(screen.getByText("当前岗位 · 甲公司")).toBeTruthy();
+    expect(within(selector).getByText("甲公司")).toBeTruthy();
+    const readyCard = screen.getByRole("heading", {
+      name: "岗位画像已确认，可以开始浏览候选人"
+    }).closest("section")!;
+    expect(within(readyCard).getByText("企业软件产品经理")).toBeTruthy();
+    expect(within(readyCard).getByText("甲公司")).toBeTruthy();
   });
 
   it("shows a Chinese retry message when candidate extraction rejects", async () => {

@@ -54,6 +54,19 @@ export function AnalysisResult({ analysis, job }: AnalysisResultProps) {
       <p className="eyebrow">匹配分析完成</p>
       <h2 id="analysis-result-title">{job.company} · 人选匹配报告</h2>
 
+      <section
+        className="result-section recruiter-conclusion"
+        aria-labelledby="recruiter-conclusion-title"
+      >
+        <h3 id="recruiter-conclusion-title">猎头结论</h3>
+        <p>{analysis.recruiterConclusion}</p>
+        <ul className="conclusion-highlights">
+          {analysis.conclusionHighlights.map((highlight) => (
+            <li key={highlight}><strong>{highlight}</strong></li>
+          ))}
+        </ul>
+      </section>
+
       <div className="result-summary">
         <div className="score-block">
           <span className="score-value">{analysis.overallScore}</span>
@@ -80,10 +93,6 @@ export function AnalysisResult({ analysis, job }: AnalysisResultProps) {
         {analysis.verificationQuestions.length === 0
           ? <p className="muted result-empty">暂无需要优先核实的问题。</p>
           : <ul>{analysis.verificationQuestions.map((question) => <li key={question}>{question}</li>)}</ul>}
-      </section>
-      <section className="result-section recruiter-conclusion">
-        <h3>猎头结论</h3>
-        <p>{analysis.recruiterConclusion}</p>
       </section>
     </section>
   );

@@ -30,6 +30,7 @@ const result: MatchAnalysis = {
   }],
   concerns: [],
   verificationQuestions: [],
+  conclusionHighlights: ["核心经验匹配"],
   recruiterConclusion: "建议推进"
 };
 

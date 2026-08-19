@@ -25,6 +25,7 @@ const evidenceBackedModelResult = {
     candidateEvidence: ["候选人材料未提供团队人数"]
   }],
   verificationQuestions: ["请核实直接管理人数", "请核实海外业务占比"],
+  conclusionHighlights: ["企业软件经验是主要优势", "联系前核实团队规模"],
   recruiterConclusion: "匹配度较高，建议联系并核实团队规模。"
 };
 
@@ -119,6 +120,20 @@ describe("runtime contracts", () => {
         ? { ...match, candidateEvidence: ["证".repeat(301)] }
         : match)
     }).success).toBe(false);
+  });
+
+  it("requires one to three concise recruiter conclusion highlights", () => {
+    // Break caught: missing or unbounded emphasis would make the conclusion hierarchy unreliable or verbose.
+    const { conclusionHighlights: _highlights, ...withoutHighlights } = evidenceBackedModelResult;
+
+    for (const invalid of [
+      withoutHighlights,
+      { ...evidenceBackedModelResult, conclusionHighlights: [] },
+      { ...evidenceBackedModelResult, conclusionHighlights: ["一", "二", "三", "四"] },
+      { ...evidenceBackedModelResult, conclusionHighlights: ["重".repeat(121)] }
+    ]) {
+      expect(modelMatchResultSchema.safeParse(invalid).success).toBe(false);
+    }
   });
 
   it.each(["matches", "concerns"] as const)(

@@ -63,6 +63,7 @@ const result: MatchAnalysis = {
   }],
   concerns: [],
   verificationQuestions: ["核实求职意愿"],
+  conclusionHighlights: ["核心经验匹配", "核实求职意愿"],
   recruiterConclusion: "建议推进"
 };
 

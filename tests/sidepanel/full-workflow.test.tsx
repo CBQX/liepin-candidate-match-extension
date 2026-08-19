@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "../../src/sidepanel/App";
@@ -47,6 +47,7 @@ const analysis: MatchAnalysis = {
     candidateEvidence: ["候选人材料未说明团队规模"]
   }],
   verificationQuestions: ["最快到岗时间是什么时候？"],
+  conclusionHighlights: ["SaaS 产品经验匹配", "沟通前核实到岗时间"],
   recruiterConclusion: "建议优先沟通并核实到岗时间。"
 };
 
@@ -192,12 +193,17 @@ describe("complete recruiter workflow", () => {
     await user.click(screen.getByRole("button", { name: "添加新岗位" }));
     await saveJob(user, "乙公司", "负责数据平台产品", "必须有 AI 项目经验");
 
-    const jobSelector = await screen.findByRole("combobox", { name: "当前岗位" }) as HTMLSelectElement;
-    expect([...jobSelector.options].map((option) => option.text)).toEqual(["甲公司", "乙公司"]);
-    expect(jobSelector.value).toBe("job-two");
+    const jobSelector = await screen.findByRole("combobox", { name: "当前岗位" });
+    expect(within(jobSelector).getByText("乙公司")).toBeTruthy();
+    await user.click(jobSelector);
+    expect(screen.getAllByRole("option").map((option) => option.getAttribute("aria-label"))).toEqual([
+      "企业软件产品经理，甲公司",
+      "企业软件产品经理，乙公司"
+    ]);
+    expect(screen.getByRole("option", { name: /乙公司/u }).getAttribute("aria-selected")).toBe("true");
 
-    await user.selectOptions(jobSelector, "job-one");
-    await waitFor(() => expect(jobSelector.value).toBe("job-one"));
+    await user.click(screen.getByRole("option", { name: /甲公司/u }));
+    await waitFor(() => expect(within(jobSelector).getByText("甲公司")).toBeTruthy());
     await user.click(screen.getByRole("button", { name: "匹配分析" }));
 
     const skills = await screen.findByLabelText("技能") as HTMLTextAreaElement;
@@ -222,13 +228,18 @@ describe("complete recruiter workflow", () => {
     expect(deps.analyzeCandidate.mock.calls[0]?.[1].skills.text)
       .toBe("SaaS、产品规划、AI 工作流");
 
-    await user.selectOptions(jobSelector, "job-two");
+    await user.click(jobSelector);
+    await user.click(screen.getByRole("option", { name: /乙公司/u }));
 
-    await waitFor(() => expect(jobSelector.value).toBe("job-two"));
+    await waitFor(() => expect(within(jobSelector).getByText("乙公司")).toBeTruthy());
     expect(screen.queryByRole("heading", { name: "甲公司 · 人选匹配报告" })).toBeNull();
     expect(screen.queryByDisplayValue("SaaS、产品规划、AI 工作流")).toBeNull();
     expect(screen.getByRole("button", { name: "匹配分析" })).toBeTruthy();
-    expect(screen.getByText("当前岗位 · 乙公司")).toBeTruthy();
+    const readyCard = screen.getByRole("heading", {
+      name: "岗位画像已确认，可以开始浏览候选人"
+    }).closest("section")!;
+    expect(within(readyCard).getByText("企业软件产品经理")).toBeTruthy();
+    expect(within(readyCard).getByText("乙公司")).toBeTruthy();
   });
 
   it("generates and confirms once, then reuses the profile for two candidates", async () => {
@@ -402,15 +413,17 @@ describe("complete recruiter workflow", () => {
     render(<App deps={deps} />);
 
     await user.click(await screen.findByRole("button", { name: "分析岗位要求" }));
-    await user.selectOptions(screen.getByRole("combobox", { name: "当前岗位" }), readyJob.id);
+    await user.click(screen.getByRole("combobox", { name: "当前岗位" }));
+    await user.click(screen.getByRole("option", { name: /虚构丙公司/u }));
 
     await waitFor(() => expect(deps.cancelJobProfile).toHaveBeenCalledWith("switch-profile-request"));
     await act(async () => {
       pending.resolve({ ok: true, data: generatedProfile });
       await pending.promise;
     });
-    expect(await screen.findByText("当前岗位 · 虚构丙公司")).toBeTruthy();
-    expect(screen.getByText("岗位画像已确认，可以开始浏览候选人")).toBeTruthy();
+    const readyCard = (await screen.findByText("岗位画像已确认，可以开始浏览候选人")).closest("section")!;
+    expect(within(readyCard).getByText("企业软件产品经理")).toBeTruthy();
+    expect(within(readyCard).getByText("虚构丙公司")).toBeTruthy();
     expect(screen.queryByRole("heading", { name: "确认招聘关键要求" })).toBeNull();
   });
 });

@@ -54,6 +54,11 @@ const analysis: MatchAnalysis = {
     candidateEvidence: ["候选人材料未提供团队人数"]
   }],
   verificationQuestions: ["请核实团队规模"],
+  conclusionHighlights: [
+    "企业软件经验是主要优势",
+    "联系前核实团队规模",
+    "<script>不是可执行标签</script>"
+  ],
   recruiterConclusion: "建议联系前核实团队规模与职责边界。"
 };
 
@@ -86,6 +91,28 @@ describe("AnalysisResult", () => {
     expect(screen.queryByText("硬性条件核对")).toBeNull();
     expect(screen.queryByText(/可信/)).toBeNull();
     expect(screen.queryByText("沟通建议")).toBeNull();
+  });
+
+  it("puts the recruiter conclusion first and renders AI highlights as safe bold text", () => {
+    // Break caught: moving the conclusion back below detail sections or interpreting provider markup would weaken hierarchy or enable injection.
+    render(<AnalysisResult analysis={analysis} job={job} />);
+
+    const report = screen.getByRole("heading", { name: "甲公司 · 人选匹配报告" }).closest("section")!;
+    const conclusion = within(report).getByRole("region", { name: "猎头结论" });
+    const scoreLabel = within(report).getByText("综合匹配分 / 100");
+    expect(conclusion.compareDocumentPosition(scoreLabel) & Node.DOCUMENT_POSITION_FOLLOWING)
+      .toBeTruthy();
+
+    const matches = within(report).getByRole("heading", { name: "主要匹配理由" });
+    const concerns = within(report).getByRole("heading", { name: "主要顾虑或信息缺口" });
+    const questions = within(report).getByRole("heading", { name: "建议核实问题" });
+    expect(matches.compareDocumentPosition(concerns) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(concerns.compareDocumentPosition(questions) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    for (const highlight of analysis.conclusionHighlights) {
+      expect(within(conclusion).getByText(highlight).tagName).toBe("STRONG");
+    }
+    expect(conclusion.querySelector("script")).toBeNull();
   });
 
   it("keeps sensitive candidate identifiers out of the lightweight provider call and result", async () => {

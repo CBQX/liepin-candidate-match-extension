@@ -43,7 +43,7 @@ describe("buildAnalysisPrompt", () => {
       "overallScore", "recommendation", "contact", "verify_before_contact", "deprioritize",
       "matches", "concerns",
       "claim", "jobEvidence", "candidateEvidence",
-      "verificationQuestions", "recruiterConclusion"
+      "verificationQuestions", "conclusionHighlights", "recruiterConclusion"
     ]) {
       expect(system).toContain(field);
     }
@@ -52,6 +52,8 @@ describe("buildAnalysisPrompt", () => {
     expect(system).toMatch(/concerns.*最多.*3/s);
     expect(system).toMatch(/verificationQuestions.*最多.*3/s);
     expect(system).toMatch(/jobEvidence.*candidateEvidence.*最多.*2/s);
+    expect(system).toMatch(/conclusionHighlights.*1.*3.*120/s);
+    expect(system).toMatch(/重点.*纯文本.*Markdown.*HTML/s);
     expect(system).toMatch(/理由.*证据.*问题.*300.*结论.*600/s);
     expect(system).not.toContain("dimensionScores");
   });

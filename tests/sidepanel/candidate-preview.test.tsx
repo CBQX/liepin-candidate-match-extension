@@ -177,7 +177,8 @@ describe("candidate preview", () => {
     expect((screen.getByLabelText("基本信息") as HTMLTextAreaElement).value).not.toContain("张三");
     expect((screen.getByLabelText("基本信息") as HTMLTextAreaElement).value).not.toContain("13812345678");
 
-    await user.selectOptions(screen.getByRole("combobox", { name: "当前岗位" }), jobB.id);
+    await user.click(screen.getByRole("combobox", { name: "当前岗位" }));
+    await user.click(screen.getByRole("option", { name: /乙公司/u }));
     await waitFor(() => expect(deps.jobs.activate).toHaveBeenCalledWith(jobB.id));
     expect(screen.queryByRole("button", { name: "确认并分析" })).toBeNull();
 
@@ -228,7 +229,8 @@ describe("candidate preview", () => {
       await waitFor(() => expect(deps.extractCurrentCandidate).toHaveBeenCalledTimes(1));
 
       if (boundary === "job") {
-        await user.selectOptions(screen.getByRole("combobox", { name: "当前岗位" }), jobB.id);
+        await user.click(screen.getByRole("combobox", { name: "当前岗位" }));
+        await user.click(screen.getByRole("option", { name: /乙公司/u }));
         await waitFor(() => expect(deps.jobs.activate).toHaveBeenCalledWith(jobB.id));
       } else if (boundary === "page") {
         deps.emitPageContextChanged();

@@ -17,6 +17,7 @@ export const contactRecommendations = [
 const requiredText = z.string().trim().min(1);
 const conciseAnalysisText = requiredText.max(300);
 const conciseConclusion = requiredText.max(600);
+const conclusionHighlight = requiredText.max(120);
 
 export const jobCriterionSchema = z.object({
   id: requiredText,
@@ -57,6 +58,7 @@ const modelAnalysisSchema = z.object({
   matches: z.array(qualitativeEvidenceSchema).min(2).max(5),
   concerns: z.array(qualitativeEvidenceSchema).max(3),
   verificationQuestions: z.array(conciseAnalysisText).max(3),
+  conclusionHighlights: z.array(conclusionHighlight).min(1).max(3),
   recruiterConclusion: conciseConclusion
 });
 

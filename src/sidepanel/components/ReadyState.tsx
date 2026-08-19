@@ -25,7 +25,9 @@ export function ReadyState({ activeJob, onMatchAnalysis, onRegenerateProfile }: 
   return (
     <section className="panel-card ready-card" aria-labelledby="ready-title">
       <div className="ready-mark" aria-hidden="true">✓</div>
-      <p className="eyebrow">当前岗位 · {activeJob.company}</p>
+      <p className="eyebrow">当前岗位</p>
+      <p className="ready-job-role">{activeJob.recruitmentProfile?.roleTitle ?? "待确认岗位"}</p>
+      <p className="ready-job-company">{activeJob.company}</p>
       <h2 id="ready-title">岗位画像已确认，可以开始浏览候选人</h2>
       <p className="muted">在猎聘打开候选人详情页后，再由你手动开始匹配。</p>
       {error && <p className="form-error" role="alert">{error}</p>}

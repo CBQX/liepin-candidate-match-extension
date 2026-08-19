@@ -82,6 +82,7 @@ const modelResult: ModelMatchResult = {
     candidateEvidence: ["材料仅显示现居地，不能证明到岗意愿"]
   }],
   verificationQuestions: ["请核实上海到岗意愿"],
+  conclusionHighlights: ["经验和学历匹配", "核实上海到岗意愿"],
   recruiterConclusion: "建议推进并核实地点意愿"
 };
 
