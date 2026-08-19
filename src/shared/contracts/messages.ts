@@ -5,6 +5,7 @@ import {
 } from "./candidate";
 import { appErrorSchema } from "../errors";
 import { jobSchema } from "./job";
+import { modelRecruitmentProfileSchema } from "./recruitment-profile";
 
 export const runtimeRequestSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("EXTRACT_CURRENT_CANDIDATE") }),
@@ -19,6 +20,20 @@ export const runtimeRequestSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("CANCEL_ANALYSIS"),
     requestId: z.string().trim().min(1).max(128)
+  }),
+  z.object({
+    type: z.literal("GENERATE_JOB_PROFILE"),
+    requestId: z.string().trim().min(1).max(128),
+    job: jobSchema
+  }),
+  z.object({
+    type: z.literal("CANCEL_JOB_PROFILE"),
+    requestId: z.string().trim().min(1).max(128)
+  }),
+  z.object({
+    type: z.literal("CONFIRM_JOB_PROFILE"),
+    jobId: z.string().trim().min(1).max(128),
+    profile: modelRecruitmentProfileSchema
   })
 ]);
 

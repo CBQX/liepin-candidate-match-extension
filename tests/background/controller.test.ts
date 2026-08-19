@@ -4,6 +4,8 @@ import type { CandidateDraft } from "../../src/shared/contracts/candidate";
 import type { ModelProvider } from "../../src/providers/model-provider";
 import { NormalizedProviderError } from "../../src/providers/model-provider";
 import type { ModelMatchResult } from "../../src/shared/contracts/matching";
+import type { Job } from "../../src/shared/contracts/job";
+import type { ModelRecruitmentProfile } from "../../src/shared/contracts/recruitment-profile";
 
 const candidateDraft: CandidateDraft = {
   basics: { text: "候选人甲", status: "complete" },
@@ -17,12 +19,39 @@ const candidateDraft: CandidateDraft = {
 
 const settings = { providerId: "deepseek", model: "deepseek-v4-pro", apiKey: "sk-test" };
 
+const profileJob: Job = {
+  id: "synthetic-job-1",
+  company: "虚构甲公司",
+  jd: "负责虚构企业软件产品",
+  customRequirements: "企业软件经验优先",
+  createdAt: "2026-08-19T00:00:00.000Z",
+  updatedAt: "2026-08-19T00:00:00.000Z"
+};
+
+const modelProfile: ModelRecruitmentProfile = {
+  version: 1,
+  roleTitle: "企业软件产品经理",
+  roleObjective: "负责虚构企业软件产品",
+  requirements: [{
+    id: "requirement-1",
+    text: "具备企业软件产品经验",
+    priority: "hard",
+    dimensionId: "functional_expertise",
+    weight: 1,
+    jobEvidence: ["负责虚构企业软件产品"]
+  }],
+  acceptableAlternatives: [],
+  ambiguities: [],
+  verificationQuestions: []
+};
+
 function dependencies(overrides: Partial<Parameters<typeof createBackgroundController>[0]> = {}) {
   return {
     getActiveTab: async () => undefined,
     sendToTab: vi.fn(),
     loadProviderSettings: async () => settings,
     resolveProvider: () => undefined,
+    confirmJobProfile: vi.fn(),
     ...overrides
   };
 }
@@ -329,5 +358,136 @@ describe("background controller", () => {
       error: { code: "ANALYSIS_CANCELLED" }
     });
     expect(analyze).not.toHaveBeenCalled();
+  });
+
+  it("generates a job profile without requiring a Liepin tab", async () => {
+    const generateRecruitmentProfile = vi.fn().mockResolvedValue(modelProfile);
+    const provider: ModelProvider = {
+      id: "deepseek",
+      models: [{ id: "deepseek-v4-pro", label: "DeepSeek V4 Pro" }],
+      validateCredentials: vi.fn(),
+      generateRecruitmentProfile,
+      analyze: vi.fn()
+    };
+    const controller = createBackgroundController(dependencies({
+      getActiveTab: async () => undefined,
+      resolveProvider: () => provider
+    }));
+
+    await expect(controller.handle({
+      type: "GENERATE_JOB_PROFILE",
+      requestId: "profile-request-1",
+      job: profileJob
+    })).resolves.toEqual({ ok: true, data: modelProfile });
+    expect(generateRecruitmentProfile).toHaveBeenCalledWith(
+      expect.objectContaining({ company: profileJob.company }),
+      settings,
+      expect.any(AbortSignal)
+    );
+  });
+
+  it("cancels only the matching in-flight job profile request", async () => {
+    let profileSignal: AbortSignal | undefined;
+    const generateRecruitmentProfile = vi.fn<NonNullable<ModelProvider["generateRecruitmentProfile"]>>(
+      (_input, _settings, signal) => {
+        profileSignal = signal;
+        return new Promise((_resolve, reject) => signal?.addEventListener("abort", () => {
+          reject(new NormalizedProviderError("ANALYSIS_CANCELLED"));
+        }));
+      }
+    );
+    const provider: ModelProvider = {
+      id: "deepseek",
+      models: [{ id: "deepseek-v4-pro", label: "DeepSeek V4 Pro" }],
+      validateCredentials: vi.fn(),
+      generateRecruitmentProfile,
+      analyze: vi.fn()
+    };
+    const controller = createBackgroundController(dependencies({ resolveProvider: () => provider }));
+    const pending = controller.handle({
+      type: "GENERATE_JOB_PROFILE",
+      requestId: "profile-request-cancel",
+      job: profileJob
+    });
+    await vi.waitFor(() => expect(profileSignal).toBeInstanceOf(AbortSignal));
+
+    await expect(controller.handle({
+      type: "CANCEL_JOB_PROFILE",
+      requestId: "profile-request-cancel"
+    })).resolves.toEqual({ ok: true, data: { cancelled: true } });
+    expect(profileSignal?.aborted).toBe(true);
+    await expect(pending).resolves.toMatchObject({
+      ok: false,
+      error: { code: "ANALYSIS_CANCELLED" }
+    });
+  });
+
+  it("confirms an edited job profile through the trusted job service dependency", async () => {
+    const confirmedJob = { ...profileJob, recruitmentProfile: { ...modelProfile, confirmedAt: "2026-08-19T01:00:00.000Z" } };
+    const confirmJobProfile = vi.fn().mockResolvedValue(confirmedJob);
+    const controller = createBackgroundController(dependencies({ confirmJobProfile }));
+
+    await expect(controller.handle({
+      type: "CONFIRM_JOB_PROFILE",
+      jobId: profileJob.id,
+      profile: modelProfile
+    })).resolves.toEqual({ ok: true, data: confirmedJob });
+    expect(confirmJobProfile).toHaveBeenCalledWith(profileJob.id, modelProfile);
+  });
+
+  it("keeps job-profile and candidate cancellation isolated even with the same request id", async () => {
+    let profileSignal: AbortSignal | undefined;
+    let candidateSignal: AbortSignal | undefined;
+    const provider: ModelProvider = {
+      id: "deepseek",
+      models: [{ id: "deepseek-v4-pro", label: "DeepSeek V4 Pro" }],
+      validateCredentials: vi.fn(),
+      generateRecruitmentProfile: vi.fn<NonNullable<ModelProvider["generateRecruitmentProfile"]>>((_input, _settings, signal) => {
+        profileSignal = signal;
+        return new Promise<ModelRecruitmentProfile>((_resolve, reject) => signal?.addEventListener("abort", () => {
+          reject(new NormalizedProviderError("ANALYSIS_CANCELLED"));
+        }));
+      }),
+      analyze: vi.fn((_input, _settings, signal) => {
+        candidateSignal = signal;
+        return new Promise<ModelMatchResult>((_resolve, reject) => {
+          signal?.addEventListener("abort", () => reject(
+            new NormalizedProviderError("ANALYSIS_CANCELLED")
+          ));
+        });
+      })
+    };
+    const controller = createBackgroundController(dependencies({ resolveProvider: () => provider }));
+    const profilePending = controller.handle({
+      type: "GENERATE_JOB_PROFILE",
+      requestId: "shared-request-id",
+      job: profileJob
+    });
+    const candidatePending = controller.handle({
+      type: "ANALYZE_CANDIDATE",
+      requestId: "shared-request-id",
+      job: profileJob,
+      candidateDraft,
+      redactionContext: { identityTokens: [], identityDetection: "undetected" }
+    });
+    await vi.waitFor(() => {
+      expect(profileSignal).toBeInstanceOf(AbortSignal);
+      expect(candidateSignal).toBeInstanceOf(AbortSignal);
+    });
+
+    await controller.handle({ type: "CANCEL_JOB_PROFILE", requestId: "shared-request-id" });
+    expect(profileSignal?.aborted).toBe(true);
+    expect(candidateSignal?.aborted).toBe(false);
+    await controller.handle({ type: "CANCEL_ANALYSIS", requestId: "shared-request-id" });
+    expect(candidateSignal?.aborted).toBe(true);
+
+    await expect(profilePending).resolves.toMatchObject({
+      ok: false,
+      error: { code: "ANALYSIS_CANCELLED" }
+    });
+    await expect(candidatePending).resolves.toMatchObject({
+      ok: false,
+      error: { code: "ANALYSIS_CANCELLED" }
+    });
   });
 });

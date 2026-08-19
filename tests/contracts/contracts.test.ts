@@ -6,6 +6,7 @@ import {
   modelMatchResultSchema,
   ruleEvaluationSchema
 } from "../../src/shared/contracts/matching";
+import { runtimeRequestSchema } from "../../src/shared/contracts/messages";
 
 const evidenceBackedModelResult = {
   dimensionScores: dimensionIds.map((dimensionId) => ({
@@ -34,6 +35,31 @@ describe("runtime contracts", () => {
     });
 
     expect(parsed.recruitmentProfile).toBeUndefined();
+  });
+
+  it("accepts bounded job-profile runtime requests and rejects invalid confirmation data", () => {
+    const job = {
+      id: "synthetic-job",
+      company: "虚构甲公司",
+      jd: "负责虚构企业软件产品",
+      customRequirements: "企业软件经验优先",
+      createdAt: "2026-08-19T00:00:00.000Z",
+      updatedAt: "2026-08-19T00:00:00.000Z"
+    };
+    expect(runtimeRequestSchema.safeParse({
+      type: "GENERATE_JOB_PROFILE",
+      requestId: "profile-request-1",
+      job
+    }).success).toBe(true);
+    expect(runtimeRequestSchema.safeParse({
+      type: "CANCEL_JOB_PROFILE",
+      requestId: "profile-request-1"
+    }).success).toBe(true);
+    expect(runtimeRequestSchema.safeParse({
+      type: "CONFIRM_JOB_PROFILE",
+      jobId: job.id,
+      profile: { version: 1, roleTitle: "不完整" }
+    }).success).toBe(false);
   });
 
   it("rejects a job with any blank required field", () => {

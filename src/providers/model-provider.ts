@@ -70,6 +70,7 @@ const errorMessages: Record<AppErrorCode, string> = {
   MODEL_TIMEOUT: "模型响应超时，请重试。",
   ANALYSIS_CANCELLED: "本次分析已取消。",
   INVALID_MODEL_OUTPUT: "模型返回内容无法验证，请重试。",
+  JOB_PROFILE_REQUIRED: "请先生成并确认岗位画像。",
   STORAGE_FAILED: "扩展设置读取失败。",
   UNKNOWN: "模型服务暂时不可用，请稍后重试。"
 };

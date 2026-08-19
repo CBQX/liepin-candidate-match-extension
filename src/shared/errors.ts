@@ -15,6 +15,7 @@ export const appErrorCodes = [
   "MODEL_TIMEOUT",
   "ANALYSIS_CANCELLED",
   "INVALID_MODEL_OUTPUT",
+  "JOB_PROFILE_REQUIRED",
   "STORAGE_FAILED",
   "UNKNOWN"
 ] as const;

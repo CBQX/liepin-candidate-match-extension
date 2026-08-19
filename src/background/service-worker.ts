@@ -6,6 +6,8 @@ import { ModelProviderRegistry } from "../providers/model-provider";
 import { registerPageContextBroadcasts } from "./page-context";
 import { IndexedDbStorageArea } from "../repositories/indexeddb-storage-area";
 import { MigratingPersistentStorageArea } from "../repositories/migrating-persistent-storage";
+import { ChromeJobRepository } from "../repositories/chrome-job-repository";
+import { JobService } from "../domain/jobs/job-service";
 
 const unknownRequestResponse = {
   ok: false as const,
@@ -17,6 +19,7 @@ const persistentStorage = new MigratingPersistentStorageArea(
   chrome.storage.local
 );
 const providerSettings = new ChromeProviderSettingsRepository(persistentStorage, chrome.storage.session);
+const jobs = new JobService(new ChromeJobRepository(persistentStorage));
 const providers = new ModelProviderRegistry([new DeepSeekProvider()]);
 
 // Trigger legacy-key cleanup as soon as the trusted service worker starts.
@@ -35,6 +38,9 @@ const controller = createBackgroundController({
   },
   resolveProvider(providerId) {
     return providers.get(providerId);
+  },
+  confirmJobProfile(jobId, profile) {
+    return jobs.confirmAndActivateProfile(jobId, profile);
   }
 });
 
