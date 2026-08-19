@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { ChromeJobRepository } from "../../src/repositories/chrome-job-repository";
 import type { StorageAreaLike } from "../../src/repositories/storage-area";
 import type { Job } from "../../src/shared/contracts/job";
+import { confirmRecruitmentProfile } from "../../src/domain/jobs/recruitment-profile";
 
 class MemoryStorageArea implements StorageAreaLike {
   private readonly values: Record<string, unknown> = {};
@@ -59,5 +60,42 @@ describe("ChromeJobRepository", () => {
 
     expect(await repository.list()).toEqual([jobA, jobB]);
     expect((await repository.getActive())?.id).toBe(jobA.id);
+  });
+
+  it("round-trips a confirmed profile through a new repository instance", async () => {
+    const storage = new MemoryStorageArea();
+    const confirmedJob: Job = {
+      ...jobA,
+      recruitmentProfile: confirmRecruitmentProfile({
+        version: 1,
+        roleTitle: "企业软件产品经理",
+        roleObjective: "负责虚构企业软件产品",
+        requirements: [{
+          id: "requirement-1",
+          text: "具备企业软件经验",
+          priority: "hard",
+          dimensionId: "functional_expertise",
+          weight: 1,
+          jobEvidence: ["负责企业软件产品"]
+        }],
+        acceptableAlternatives: [],
+        ambiguities: [],
+        verificationQuestions: []
+      }, "2026-08-19T01:00:00.000Z")
+    };
+
+    await new ChromeJobRepository(storage).saveAndActivate(confirmedJob);
+    const reloaded = new ChromeJobRepository(storage);
+
+    expect(await reloaded.list()).toEqual([confirmedJob]);
+    expect(await reloaded.getActive()).toEqual(confirmedJob);
+  });
+
+  it("loads a legacy job without a recruitment profile", async () => {
+    const storage = new MemoryStorageArea();
+    await new ChromeJobRepository(storage).saveAndActivate(jobA);
+
+    expect((await new ChromeJobRepository(storage).getActive())?.recruitmentProfile)
+      .toBeUndefined();
   });
 });
