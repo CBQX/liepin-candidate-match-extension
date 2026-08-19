@@ -65,28 +65,23 @@ const candidateDraft: CandidateDraft = {
 };
 
 const modelResult: ModelMatchResult = {
-  dimensionScores: [
-    { dimensionId: "hard_requirements", score: 80, evidence: ["学历和经验有明确证据"] },
-    { dimensionId: "functional_expertise", score: 80, evidence: ["具备产品工作经验"] },
-    { dimensionId: "industry_business", score: 80, evidence: ["有企业软件项目经历"] },
-    { dimensionId: "seniority_impact", score: 80, evidence: ["项目职责明确"] },
-    { dimensionId: "trajectory_stability", score: 80, evidence: ["材料未显示明显断层"] },
-    { dimensionId: "recruiter_feasibility", score: 80, evidence: ["具备可沟通的相关卖点"] }
-  ],
+  overallScore: 80,
+  recommendation: "verify_before_contact",
   matches: [{
     claim: "经验匹配",
     jobEvidence: ["岗位要求 5 年以上经验"],
     candidateEvidence: ["候选人明确有 8 年工作经验"]
+  }, {
+    claim: "学历匹配",
+    jobEvidence: ["岗位要求本科学历"],
+    candidateEvidence: ["候选人材料明确为本科"]
   }],
-  mismatches: [],
-  risks: [],
-  missingInformation: [{
+  concerns: [{
     claim: "工作地点意愿未知",
     jobEvidence: ["岗位工作地点为上海"],
     candidateEvidence: ["材料仅显示现居地，不能证明到岗意愿"]
   }],
   verificationQuestions: ["请核实上海到岗意愿"],
-  outreachAdvice: ["从企业软件项目切入"],
   recruiterConclusion: "建议推进并核实地点意愿"
 };
 
@@ -124,8 +119,8 @@ function analysisRuntimeRequest(requestId = "analysis-test") {
 }
 
 describe("analyzeCandidate", () => {
-  it("redacts, evaluates rules conservatively, calls the provider, and composes only the final analysis", async () => {
-    // Break caught: bypassing any pipeline stage could leak identifiers, omit rules, revive deterministic location matching, or return an uncomposed score.
+  it("redacts and sends only the confirmed profile plus candidate while preserving the AI decision", async () => {
+    // Break caught: duplicate local criteria/rules or local score remapping would make the lightweight call slower or override the AI result.
     const analyze = vi.fn<NonNullable<ModelProvider["analyzeCandidate"]>>()
       .mockResolvedValue(modelResult);
 
@@ -142,49 +137,16 @@ describe("analyzeCandidate", () => {
     expect(analyze).toHaveBeenCalledTimes(1);
     const [input, receivedSettings] = analyze.mock.calls[0]!;
     expect(receivedSettings).toEqual(settings);
+    expect(Object.keys(input)).toEqual(["recruitmentProfile", "candidateDraft"]);
     expect(input.recruitmentProfile).toEqual(recruitmentProfile);
     expect(input).not.toHaveProperty("job");
     expect(JSON.stringify(input)).not.toContain(job.jd);
     expect(JSON.stringify(input)).not.toContain(job.customRequirements);
     expect(input.candidateDraft.basics.text).not.toContain("张三");
     expect(input.candidateDraft.basics.text).not.toContain("13812345678");
-    expect(input.criteria.map(({ text }) => text)).toEqual([
-      "必须工作地点：上海",
-      "必须本科",
-      "必须有 5 年以上经验"
-    ]);
-    expect(input.ruleEvaluations).toEqual([
-      {
-        criterionId: "profile-location",
-        status: "unknown",
-        evidence: []
-      },
-      { criterionId: "profile-degree", status: "met", evidence: ["明确学历：本科"] },
-      {
-        criterionId: "profile-years",
-        status: "unknown",
-        evidence: []
-      }
-    ]);
-    expect(analysis.hardRequirements).toEqual([
-      {
-        criterionId: "profile-location",
-        status: "unknown",
-        evidence: ["基本信息：现居地：上海"]
-      },
-      { criterionId: "profile-degree", status: "met", evidence: ["明确学历：本科"] },
-      {
-        criterionId: "profile-years",
-        status: "unknown",
-        evidence: ["工作经历：明确 8 年工作经验"]
-      }
-    ]);
-    expect(analysis).toMatchObject({
-      overallScore: 80,
-      recommendation: "cautious",
-      confidence: "low",
-      recruiterConclusion: "建议推进并核实地点意愿"
-    });
+    expect(input).not.toHaveProperty("criteria");
+    expect(input).not.toHaveProperty("ruleEvaluations");
+    expect(analysis).toEqual(modelResult);
   });
 
   it("re-redacts a recognized name added after preview and never forwards redaction metadata", async () => {
@@ -304,11 +266,11 @@ describe("ANALYZE_CANDIDATE controller response", () => {
     });
   });
 
-  it("maps incomplete dimension coverage to INVALID_MODEL_OUTPUT without returning a partial score", async () => {
-    // Break caught: composition validation failures could be mislabeled UNKNOWN or leak an incomplete score to the UI.
+  it("maps too few matching reasons to INVALID_MODEL_OUTPUT without returning a partial score", async () => {
+    // Break caught: defensive validation must enforce the lightweight minimum even for alternate providers.
     const incompleteResult = {
       ...modelResult,
-      dimensionScores: modelResult.dimensionScores.slice(0, 5)
+      matches: modelResult.matches.slice(0, 1)
     } as ModelMatchResult;
     const provider = providerWithAnalyze(vi.fn().mockResolvedValue(incompleteResult));
     const controller = createBackgroundController({
@@ -327,13 +289,11 @@ describe("ANALYZE_CANDIDATE controller response", () => {
     expect(response).not.toHaveProperty("data.overallScore");
   });
 
-  it("maps evidence-free provider output to INVALID_MODEL_OUTPUT without returning a partial result", async () => {
-    // Break caught: a future provider adapter could skip schema validation and pass an unsupported score without evidence.
+  it("maps an out-of-range direct score to INVALID_MODEL_OUTPUT without returning a partial result", async () => {
+    // Break caught: a future provider adapter could skip schema validation and pass an unsupported direct score.
     const evidenceFreeResult = {
       ...modelResult,
-      dimensionScores: modelResult.dimensionScores.map((dimension, index) => index === 0
-        ? { ...dimension, evidence: [] }
-        : dimension)
+      overallScore: 101
     } as ModelMatchResult;
     const provider = providerWithAnalyze(vi.fn().mockResolvedValue(evidenceFreeResult));
     const controller = createBackgroundController({
@@ -356,11 +316,9 @@ describe("ANALYZE_CANDIDATE controller response", () => {
     // Break caught: defensive validation must cover claims as well as numeric scores for future provider adapters.
     const evidenceFreeResult = {
       ...modelResult,
-      matches: [{
-        claim: "经验匹配",
-        jobEvidence: ["岗位要求 5 年以上经验"],
-        candidateEvidence: []
-      }]
+      matches: modelResult.matches.map((match, index) => index === 0
+        ? { ...match, candidateEvidence: [] }
+        : match)
     } as ModelMatchResult;
     const controller = createBackgroundController({
       getActiveTab: async () => undefined,

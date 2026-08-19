@@ -57,6 +57,9 @@ export function ModelSettingsForm({ onSave }: ModelSettingsFormProps) {
             <option value="deepseek-v4-flash">DeepSeek V4 Flash</option>
           </select>
         </label>
+        <p className="field-hint">
+          所选模型用于岗位画像；候选人匹配固定使用 DeepSeek V4 Flash。
+        </p>
 
         <label>
           DeepSeek API Key

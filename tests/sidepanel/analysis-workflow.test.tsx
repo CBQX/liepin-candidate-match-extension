@@ -51,36 +51,22 @@ const candidateDraft: CandidateDraft = {
 
 const result: MatchAnalysis = {
   overallScore: 80,
-  recommendation: "recommend",
-  confidence: "medium",
-  dimensionScores: [
-    { dimensionId: "hard_requirements", score: 80, evidence: ["本科"] },
-    { dimensionId: "functional_expertise", score: 80, evidence: ["产品经验"] },
-    { dimensionId: "industry_business", score: 80, evidence: ["企业背景"] },
-    { dimensionId: "seniority_impact", score: 80, evidence: ["项目影响"] },
-    { dimensionId: "trajectory_stability", score: 80, evidence: ["经历连续"] },
-    { dimensionId: "recruiter_feasibility", score: 80, evidence: ["可推进"] }
-  ],
-  hardRequirements: [{ criterionId: "custom-1", status: "met", evidence: ["本科"] }],
-  matches: [],
-  mismatches: [],
-  risks: [],
-  missingInformation: [],
+  recommendation: "contact",
+  matches: [{
+    claim: "产品经验匹配",
+    jobEvidence: ["岗位要求产品经验"],
+    candidateEvidence: ["候选人有产品经验"]
+  }, {
+    claim: "学历要求匹配",
+    jobEvidence: ["岗位要求本科"],
+    candidateEvidence: ["候选人为本科"]
+  }],
+  concerns: [],
   verificationQuestions: ["核实求职意愿"],
-  outreachAdvice: ["从产品经验切入"],
   recruiterConclusion: "建议推进"
 };
 
-const providerResult: ModelMatchResult = {
-  dimensionScores: result.dimensionScores,
-  matches: result.matches,
-  mismatches: result.mismatches,
-  risks: result.risks,
-  missingInformation: result.missingInformation,
-  verificationQuestions: result.verificationQuestions,
-  outreachAdvice: result.outreachAdvice,
-  recruiterConclusion: result.recruiterConclusion
-};
+const providerResult: ModelMatchResult = result;
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -283,6 +269,7 @@ describe("analysis workflow", () => {
     await screen.findByRole("button", { name: "确认并分析" });
     await confirmPrivacyAndAnalyze(user);
     expect(await screen.findByText("正在生成匹配分析…")).toBeTruthy();
+    expect(screen.getByText("正在生成综合分、主要理由和联系建议，请稍候。")).toBeTruthy();
 
     act(() => deps.emitPageContextChanged());
     expect(await screen.findByRole("button", { name: "匹配分析" })).toBeTruthy();

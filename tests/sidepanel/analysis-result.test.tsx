@@ -6,7 +6,7 @@ import { detectCandidateRedactionContext, redactCandidateDraft } from "../../src
 import type { ModelProvider } from "../../src/providers/model-provider";
 import type { CandidateDraft } from "../../src/shared/contracts/candidate";
 import type { Job } from "../../src/shared/contracts/job";
-import type { MatchAnalysis, ModelMatchResult } from "../../src/shared/contracts/matching";
+import type { MatchAnalysis } from "../../src/shared/contracts/matching";
 
 afterEach(() => cleanup());
 
@@ -14,25 +14,18 @@ const job: Job = {
   id: "job-1",
   company: "甲公司",
   jd: "负责企业软件产品",
-  customRequirements: "必须本科\n必须工作地点：上海",
+  customRequirements: "企业软件经验优先",
   recruitmentProfile: {
     version: 1,
     roleTitle: "企业软件产品经理",
     roleObjective: "负责虚构企业软件产品",
     requirements: [{
-      id: "custom-1",
-      text: "必须本科",
+      id: "profile-1",
+      text: "具备企业软件产品经验",
       priority: "hard",
-      dimensionId: "hard_requirements",
-      weight: 50,
-      jobEvidence: ["必须本科"]
-    }, {
-      id: "custom-2",
-      text: "必须工作地点：上海",
-      priority: "hard",
-      dimensionId: "hard_requirements",
-      weight: 50,
-      jobEvidence: ["必须工作地点：上海"]
+      dimensionId: "functional_expertise",
+      weight: 100,
+      jobEvidence: ["岗位要求企业软件产品经验"]
     }],
     acceptableAlternatives: [],
     ambiguities: [],
@@ -45,205 +38,77 @@ const job: Job = {
 
 const analysis: MatchAnalysis = {
   overallScore: 78,
-  recommendation: "recommend",
-  confidence: "medium",
-  dimensionScores: [
-    { dimensionId: "hard_requirements", score: 85, evidence: ["学历证据充分"] },
-    { dimensionId: "functional_expertise", score: 82, evidence: ["产品能力证据"] },
-    { dimensionId: "industry_business", score: 76, evidence: ["企业软件背景证据"] },
-    { dimensionId: "seniority_impact", score: 72, evidence: ["影响力证据"] },
-    { dimensionId: "trajectory_stability", score: 68, evidence: ["任职时间证据"] },
-    { dimensionId: "recruiter_feasibility", score: 80, evidence: ["推进卖点证据"] }
-  ],
-  hardRequirements: [
-    { criterionId: "custom-1", status: "met", evidence: ["候选人明确为本科"] },
-    { criterionId: "custom-2", status: "unknown", evidence: [] }
-  ],
+  recommendation: "verify_before_contact",
   matches: [{
     claim: "企业软件经验匹配",
     jobEvidence: ["岗位要求企业软件产品经验"],
     candidateEvidence: ["候选人负责过 SaaS 产品"]
+  }, {
+    claim: "项目交付经验匹配",
+    jobEvidence: ["岗位要求推动复杂项目交付"],
+    candidateEvidence: ["候选人材料列出跨团队上线经历"]
   }],
-  mismatches: [{
-    claim: "管理跨度尚未达到岗位预期",
-    jobEvidence: ["岗位希望管理 10 人团队"],
-    candidateEvidence: ["候选人材料仅明确管理 4 人"]
+  concerns: [{
+    claim: "管理跨度需要核实",
+    jobEvidence: ["岗位包含团队管理职责"],
+    candidateEvidence: ["候选人材料未提供团队人数"]
   }],
-  risks: [{
-    claim: "近期任职时间偏短",
-    jobEvidence: ["岗位重视稳定性"],
-    candidateEvidence: ["最近一段经历为 10 个月"]
-  }],
-  missingInformation: [{
-    claim: "到岗意愿未知",
-    jobEvidence: ["岗位工作地点为上海"],
-    candidateEvidence: ["材料只显示现居地，未说明到岗意愿"]
-  }],
-  verificationQuestions: ["请核实上海到岗意愿"],
-  outreachAdvice: ["从 SaaS 产品经历切入"],
-  recruiterConclusion: "建议推进，电话中优先核实地点意愿与团队规模。"
+  verificationQuestions: ["请核实团队规模"],
+  recruiterConclusion: "建议联系前核实团队规模与职责边界。"
 };
 
 describe("AnalysisResult", () => {
-  it("renders the complete recruiter result and keeps every evidence item under its claim", () => {
-    // Break caught: omitting a result section or detaching evidence from its claim would make the recommendation impossible to audit.
+  it("renders only the lightweight recruiter result with evidence attached to each reason", () => {
+    // Break caught: restoring legacy dimensions or detaching evidence would make the fast report noisy or unauditable.
     render(<AnalysisResult analysis={analysis} job={job} />);
 
     expect(screen.getByText("78")).toBeTruthy();
-    expect(screen.getByText("建议联系")).toBeTruthy();
-    expect(screen.getByText("中可信")).toBeTruthy();
+    expect(screen.getByText("联系前先核实")).toBeTruthy();
 
-    for (const label of [
-      "硬性条件",
-      "职能经验与专业能力",
-      "行业与业务匹配",
-      "职级、管理跨度与成果",
-      "职业轨迹与稳定性",
-      "猎头推进可行性"
-    ]) {
-      expect(screen.getByText(label)).toBeTruthy();
-    }
-    for (const evidence of [
-      "学历证据充分",
-      "产品能力证据",
-      "企业软件背景证据",
-      "影响力证据",
-      "任职时间证据",
-      "推进卖点证据"
-    ]) {
-      expect(screen.getByText(evidence)).toBeTruthy();
-    }
-
-    const educationRequirement = screen.getByText("必须本科").closest("li")!;
-    expect(within(educationRequirement).getByText("满足")).toBeTruthy();
-    expect(within(educationRequirement).getByText("候选人明确为本科")).toBeTruthy();
-    const locationRequirement = screen.getByText("必须工作地点：上海").closest("li")!;
-    expect(within(locationRequirement).getByText("未知")).toBeTruthy();
-    expect(screen.getByText(
-      "阶段 C 中，地点、工作年限和证书仅供模型分析与猎头核实；这三类在确定性硬条件核对中始终显示“未知”。"
-    )).toBeTruthy();
-    expect(screen.getByText(
-      "自然语言履历可能包含范围、否定、计划或有效期语义，因此不用于自动满足或影响联系建议。"
-    )).toBeTruthy();
-
-    const claimEvidence = [
+    for (const [claim, jobEvidence, candidateEvidence] of [
       ["企业软件经验匹配", "岗位要求企业软件产品经验", "候选人负责过 SaaS 产品"],
-      ["管理跨度尚未达到岗位预期", "岗位希望管理 10 人团队", "候选人材料仅明确管理 4 人"],
-      ["近期任职时间偏短", "岗位重视稳定性", "最近一段经历为 10 个月"],
-      ["到岗意愿未知", "岗位工作地点为上海", "材料只显示现居地，未说明到岗意愿"]
-    ];
-    for (const [claim, jobEvidence, candidateEvidence] of claimEvidence) {
+      ["项目交付经验匹配", "岗位要求推动复杂项目交付", "候选人材料列出跨团队上线经历"],
+      ["管理跨度需要核实", "岗位包含团队管理职责", "候选人材料未提供团队人数"]
+    ] as const) {
       const item = screen.getByText(claim).closest("li")!;
       expect(within(item).getByText(jobEvidence)).toBeTruthy();
       expect(within(item).getByText(candidateEvidence)).toBeTruthy();
     }
 
-    expect(screen.getByText("匹配项")).toBeTruthy();
-    expect(screen.getByText("不匹配项")).toBeTruthy();
-    expect(screen.getByText("风险提示")).toBeTruthy();
-    expect(screen.getByText("缺失信息")).toBeTruthy();
-    expect(screen.getByText("核实问题")).toBeTruthy();
-    expect(screen.getByText("沟通建议")).toBeTruthy();
+    expect(screen.getByText("主要匹配理由")).toBeTruthy();
+    expect(screen.getByText("主要顾虑或信息缺口")).toBeTruthy();
+    expect(screen.getByText("建议核实问题")).toBeTruthy();
     expect(screen.getByText("猎头结论")).toBeTruthy();
-    expect(screen.getByText("请核实上海到岗意愿")).toBeTruthy();
-    expect(screen.getByText("从 SaaS 产品经历切入")).toBeTruthy();
-    expect(screen.getByText("建议推进，电话中优先核实地点意愿与团队规模。")).toBeTruthy();
+    expect(screen.getByText("请核实团队规模")).toBeTruthy();
+    expect(screen.getByText("建议联系前核实团队规模与职责边界。")).toBeTruthy();
+
+    expect(screen.queryByText("六维评分")).toBeNull();
+    expect(screen.queryByText("硬性条件核对")).toBeNull();
+    expect(screen.queryByText(/可信/)).toBeNull();
+    expect(screen.queryByText("沟通建议")).toBeNull();
   });
 
-  it("isolates local evidence from an adversarial provider while preserving it for recruiters", async () => {
-    const breakerJob: Job = {
-      ...job,
-      jd: "必须有 5 年以上经验",
-      customRequirements: "必须工作地点：上海\n必须持有 PMP\n必须本科",
-      recruitmentProfile: {
-        version: 1,
-        roleTitle: "企业软件产品经理",
-        roleObjective: "负责虚构企业软件产品",
-        requirements: [{
-          id: "custom-1",
-          text: "必须工作地点：上海",
-          priority: "hard",
-          dimensionId: "hard_requirements",
-          weight: 25,
-          jobEvidence: ["必须工作地点：上海"]
-        }, {
-          id: "custom-2",
-          text: "必须持有 PMP",
-          priority: "hard",
-          dimensionId: "hard_requirements",
-          weight: 25,
-          jobEvidence: ["必须持有 PMP"]
-        }, {
-          id: "custom-3",
-          text: "必须本科",
-          priority: "hard",
-          dimensionId: "hard_requirements",
-          weight: 25,
-          jobEvidence: ["必须本科"]
-        }, {
-          id: "jd-1",
-          text: "必须有 5 年以上经验",
-          priority: "hard",
-          dimensionId: "functional_expertise",
-          weight: 25,
-          jobEvidence: ["必须有 5 年以上经验"]
-        }],
-        acceptableAlternatives: [],
-        ambiguities: [],
-        verificationQuestions: [],
-        confirmedAt: "2026-08-19T00:00:00.000Z"
-      }
-    };
+  it("keeps sensitive candidate identifiers out of the lightweight provider call and result", async () => {
     const sensitiveDraft: CandidateDraft = {
       basics: {
         text: "姓名：张三，手机 13812345678，现居地：北京",
         status: "complete"
       },
       workExperience: {
-        text: "张三拥有 8 年工作经验，简历ID：123456",
+        text: "负责企业软件产品，简历ID：123456",
         status: "complete"
       },
-      projects: { text: "企业软件项目", status: "complete" },
+      projects: { text: "搭建招聘系统", status: "complete" },
       education: { text: "本科学历", status: "complete" },
       skills: {
-        text: "张三已持有 PMP，https://www.liepin.com/candidate/secret",
+        text: "需求分析，https://www.liepin.com/candidate/secret",
         status: "complete"
       },
-      other: { text: "", status: "missing" },
+      other: { text: "候选人ID：lp-888", status: "complete" },
       extractionConfidence: "high"
     };
-    const draftWithoutLocalEvidence: CandidateDraft = {
-      ...sensitiveDraft,
-      basics: { text: "姓名：李四，手机 13912345678", status: "complete" },
-      workExperience: { text: "负责企业软件产品", status: "complete" },
-      skills: { text: "需求分析", status: "complete" }
-    };
-    const providerOmission: ModelMatchResult = {
-      dimensionScores: analysis.dimensionScores.map(({ dimensionId }) => ({
-        dimensionId,
-        score: 80,
-        evidence: ["模型仅返回维度级说明"]
-      })),
-      matches: [],
-      mismatches: [],
-      risks: [],
-      missingInformation: [],
-      verificationQuestions: [],
-      outreachAdvice: [],
-      recruiterConclusion: "请由猎头结合候选人来源证据核实"
-    };
-    const providerAnalyze = vi.fn<ModelProvider["analyzeCandidate"]>().mockImplementation(async (input) => {
-      const sawRecruiterOnlyEvidence = input.ruleEvaluations.some(
-        ({ status, evidence }) => status === "unknown" && evidence.length > 0
-      );
-      return {
-        ...providerOmission,
-        dimensionScores: providerOmission.dimensionScores.map((dimension) => ({
-          ...dimension,
-          score: sawRecruiterOnlyEvidence ? 10 : 80
-        }))
-      };
-    });
+    const providerAnalyze = vi.fn<ModelProvider["analyzeCandidate"]>()
+      .mockResolvedValue(analysis);
     const provider: ModelProvider = {
       id: "deepseek",
       models: [],
@@ -252,8 +117,8 @@ describe("AnalysisResult", () => {
       analyzeCandidate: providerAnalyze
     };
 
-    const composed = await analyzeCandidate({
-      job: breakerJob,
+    const result = await analyzeCandidate({
+      job,
       candidateDraft: sensitiveDraft,
       redactionContext: detectCandidateRedactionContext(sensitiveDraft.basics.text)
     }, {
@@ -261,84 +126,15 @@ describe("AnalysisResult", () => {
       settings: { providerId: "deepseek", model: "deepseek-v4-pro", apiKey: "sk-test" },
       redact: redactCandidateDraft
     });
-    const composedWithoutLocalEvidence = await analyzeCandidate({
-      job: breakerJob,
-      candidateDraft: draftWithoutLocalEvidence,
-      redactionContext: detectCandidateRedactionContext(draftWithoutLocalEvidence.basics.text)
-    }, {
-      provider,
-      settings: { providerId: "deepseek", model: "deepseek-v4-pro", apiKey: "sk-test" },
-      redact: redactCandidateDraft
-    });
 
-    const expectedHardRequirements = [
-      {
-        criterionId: "custom-1",
-        status: "unknown" as const,
-        evidence: ["基本信息：现居地：北京"]
-      },
-      {
-        criterionId: "custom-2",
-        status: "unknown" as const,
-        evidence: ["技能：候选人已持有 PMP，[已移除]"]
-      },
-      {
-        criterionId: "custom-3",
-        status: "met" as const,
-        evidence: ["明确学历：本科"]
-      },
-      {
-        criterionId: "jd-1",
-        status: "unknown" as const,
-        evidence: ["工作经历：候选人拥有 8 年工作经验，简历ID：[已移除]"]
-      }
-    ];
-    expect(providerOmission.matches).toEqual([]);
-    expect(providerOmission.missingInformation).toEqual([]);
-    for (const [providerInput] of providerAnalyze.mock.calls) {
-      expect(providerInput.ruleEvaluations).toEqual([
-        { criterionId: "custom-1", status: "unknown", evidence: [] },
-        { criterionId: "custom-2", status: "unknown", evidence: [] },
-        { criterionId: "custom-3", status: "met", evidence: ["明确学历：本科"] },
-        { criterionId: "jd-1", status: "unknown", evidence: [] }
-      ]);
-    }
-    expect(composed.hardRequirements).toEqual(expectedHardRequirements);
-    expect(composedWithoutLocalEvidence.hardRequirements).toEqual([
-      { criterionId: "custom-1", status: "unknown", evidence: [] },
-      { criterionId: "custom-2", status: "unknown", evidence: [] },
-      { criterionId: "custom-3", status: "met", evidence: ["明确学历：本科"] },
-      { criterionId: "jd-1", status: "unknown", evidence: [] }
-    ]);
-    expect({
-      overallScore: composed.overallScore,
-      confidence: composed.confidence,
-      recommendation: composed.recommendation
-    }).toEqual({
-      overallScore: composedWithoutLocalEvidence.overallScore,
-      confidence: composedWithoutLocalEvidence.confidence,
-      recommendation: composedWithoutLocalEvidence.recommendation
-    });
-    expect(composed).toMatchObject({
-      overallScore: 80,
-      confidence: "low",
-      recommendation: "cautious"
-    });
-    expect(JSON.stringify(composed)).not.toMatch(/张三|13812345678|123456|liepin\.com|candidate\/secret/u);
-    expect(JSON.stringify(providerAnalyze.mock.calls)).not.toMatch(
-      /张三|李四|13812345678|13912345678|123456|liepin\.com|candidate\/secret/u
+    const providerInput = providerAnalyze.mock.calls[0]?.[0];
+    expect(Object.keys(providerInput ?? {})).toEqual(["recruitmentProfile", "candidateDraft"]);
+    expect(JSON.stringify(providerInput)).not.toMatch(
+      /张三|13812345678|123456|lp-888|liepin\.com|candidate\/secret/u
     );
-
-    render(<AnalysisResult analysis={composed} job={breakerJob} />);
-    for (const [criterionText, sourceEvidence] of [
-      ["必须工作地点：上海", "基本信息：现居地：北京"],
-      ["必须持有 PMP", "技能：候选人已持有 PMP，[已移除]"],
-      ["必须有 5 年以上经验", "工作经历：候选人拥有 8 年工作经验，简历ID：[已移除]"]
-    ] as const) {
-      const requirement = screen.getByText(criterionText).closest("li")!;
-      expect(within(requirement).getByText("未知")).toBeTruthy();
-      expect(within(requirement).getByText("候选人来源证据（需猎头核实）")).toBeTruthy();
-      expect(within(requirement).getByText(sourceEvidence)).toBeTruthy();
-    }
+    expect(JSON.stringify(result)).not.toMatch(
+      /张三|13812345678|123456|lp-888|liepin\.com|candidate\/secret/u
+    );
+    expect(result).toEqual(analysis);
   });
 });

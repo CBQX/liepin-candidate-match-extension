@@ -24,6 +24,7 @@ type Fetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Respons
 const API_BASE = "https://api.deepseek.com";
 const HEADER_TIMEOUT_MS = 25_000;
 const BODY_TIMEOUT_MS = 25_000;
+const CANDIDATE_MODEL = "deepseek-v4-flash";
 const REPAIR_INSTRUCTION = "上一次输出为空、被截断或不符合约定协议。请修复错误，并仅返回一个字段完整、可解析且符合协议的完整 JSON 对象。";
 
 export { mapModelProviderError as mapProviderError };
@@ -42,6 +43,12 @@ function errorCodeFromResponse(status: number, payload: unknown): AppErrorCode {
 
   if (details.includes("insufficient_balance") || details.includes("insufficient balance") || details.includes("余额不足")) {
     return "INSUFFICIENT_BALANCE";
+  }
+  if (
+    details.includes("model")
+    && /not[_ ]found|unavailable|does not exist|不可用/u.test(details)
+  ) {
+    return "MODEL_UNAVAILABLE";
   }
   if (status >= 500) return "PROVIDER_SERVICE_UNAVAILABLE";
   if (status >= 400) return "INVALID_PROVIDER_REQUEST";
@@ -150,7 +157,8 @@ export class DeepSeekProvider implements ModelProvider {
       modelRecruitmentProfileSchema,
       settings,
       signal,
-      4096
+      4096,
+      settings.model
     );
   }
 
@@ -164,7 +172,8 @@ export class DeepSeekProvider implements ModelProvider {
       modelMatchResultSchema,
       settings,
       signal,
-      8192
+      8192,
+      CANDIDATE_MODEL
     );
   }
 
@@ -173,7 +182,8 @@ export class DeepSeekProvider implements ModelProvider {
     schema: ZodType<T>,
     settings: ProviderSettings,
     signal: AbortSignal | undefined,
-    maxTokens: number
+    maxTokens: number,
+    requestModel: string
   ): Promise<T> {
     this.requireApiKey(settings);
     this.requireSupportedModel(settings);
@@ -192,7 +202,7 @@ export class DeepSeekProvider implements ModelProvider {
           method: "POST",
           headers: this.headers(settings),
           body: JSON.stringify({
-            model: settings.model,
+            model: requestModel,
             messages,
             response_format: { type: "json_object" },
             thinking: { type: "disabled" },

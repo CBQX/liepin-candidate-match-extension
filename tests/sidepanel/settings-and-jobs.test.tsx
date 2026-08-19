@@ -159,6 +159,9 @@ describe("side-panel model settings", () => {
       "DeepSeek V4 Pro",
       "DeepSeek V4 Flash"
     ]);
+    expect(screen.getByText(
+      "所选模型用于岗位画像；候选人匹配固定使用 DeepSeek V4 Flash。"
+    )).toBeTruthy();
     expect(rememberDevice.checked).toBe(false);
 
     await user.type(keyInput, "sk-test");

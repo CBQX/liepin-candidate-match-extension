@@ -18,16 +18,18 @@ const draft: CandidateDraft = {
 
 const result: MatchAnalysis = {
   overallScore: 80,
-  recommendation: "recommend",
-  confidence: "high",
-  dimensionScores: [],
-  hardRequirements: [],
-  matches: [],
-  mismatches: [],
-  risks: [],
-  missingInformation: [],
+  recommendation: "contact",
+  matches: [{
+    claim: "产品经验匹配",
+    jobEvidence: ["岗位要求产品经验"],
+    candidateEvidence: ["候选人有产品经验"]
+  }, {
+    claim: "行业经验匹配",
+    jobEvidence: ["岗位要求企业软件经验"],
+    candidateEvidence: ["候选人有企业软件经验"]
+  }],
+  concerns: [],
   verificationQuestions: [],
-  outreachAdvice: [],
   recruiterConclusion: "建议推进"
 };
 

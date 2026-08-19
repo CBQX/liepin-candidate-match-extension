@@ -1,7 +1,3 @@
-import { composeAnalysis } from "../domain/matching/compose-analysis";
-import { extractObjectiveFacts } from "../domain/matching/facts";
-import { criteriaFromRecruitmentProfile } from "../domain/matching/requirements";
-import { evaluateObjectiveRules } from "../domain/matching/rules";
 import type { ModelProvider } from "../providers/model-provider";
 import type { ProviderSettings } from "../repositories/chrome-provider-settings";
 import type { CandidateDraft } from "../shared/contracts/candidate";
@@ -50,34 +46,17 @@ export async function analyzeCandidate(
   }
 
   const cleanCandidate = deps.redact(request.candidateDraft, request.redactionContext);
-  const criteria = criteriaFromRecruitmentProfile(recruitmentProfile);
-  const facts = extractObjectiveFacts(cleanCandidate);
-  const ruleEvaluations = evaluateObjectiveRules(criteria, facts);
-  const providerRuleEvaluations = ruleEvaluations.map((ruleEvaluation) =>
-    ruleEvaluation.status === "unknown"
-      ? { ...ruleEvaluation, evidence: [] }
-      : ruleEvaluation
-  );
   const modelResult = await deps.provider.analyzeCandidate(
     {
       recruitmentProfile,
-      candidateDraft: cleanCandidate,
-      criteria,
-      // Unknown-status source evidence is recruiter-only compensation. The provider
-      // already receives the redacted draft and must not use this local UI metadata.
-      ruleEvaluations: providerRuleEvaluations
+      candidateDraft: cleanCandidate
     },
     deps.settings,
     deps.signal
   );
   try {
     const validatedModelResult = modelMatchResultSchema.parse(modelResult);
-    return matchAnalysisSchema.parse(composeAnalysis(
-      validatedModelResult,
-      ruleEvaluations,
-      cleanCandidate,
-      recruitmentProfile
-    ));
+    return matchAnalysisSchema.parse(validatedModelResult);
   } catch {
     throw new AnalysisPipelineError("INVALID_MODEL_OUTPUT");
   }

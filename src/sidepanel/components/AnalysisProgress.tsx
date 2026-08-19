@@ -8,7 +8,7 @@ export function AnalysisProgress({ onCancel }: AnalysisProgressProps) {
       <span className="progress-spinner" aria-hidden="true" />
       <p className="eyebrow">正在分析</p>
       <h2>正在生成匹配分析…</h2>
-      <p className="muted">正在核对硬性条件、岗位证据和候选人经历，请稍候。</p>
+      <p className="muted">正在生成综合分、主要理由和联系建议，请稍候。</p>
       <button className="secondary-button" type="button" onClick={onCancel}>取消分析</button>
     </section>
   );

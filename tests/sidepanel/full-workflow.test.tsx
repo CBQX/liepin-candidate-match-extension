@@ -27,39 +27,26 @@ const extractedCandidate: CandidateDraft = {
 
 const analysis: MatchAnalysis = {
   overallScore: 86,
-  recommendation: "strong_recommend",
-  confidence: "medium",
-  dimensionScores: [
-    { dimensionId: "hard_requirements", score: 90, evidence: ["候选人材料明确为本科"] },
-    { dimensionId: "functional_expertise", score: 88, evidence: ["具备招聘 SaaS 产品经验"] },
-    { dimensionId: "industry_business", score: 85, evidence: ["来自企业软件行业"] },
-    { dimensionId: "seniority_impact", score: 84, evidence: ["承担从 0 到 1 产品职责"] },
-    { dimensionId: "trajectory_stability", score: 80, evidence: ["履历连续"] },
-    { dimensionId: "recruiter_feasibility", score: 86, evidence: ["有清晰沟通卖点"] }
-  ],
-  hardRequirements: [{
-    criterionId: "custom-1",
-    status: "met",
-    evidence: ["岗位要求本科；候选人教育经历为本科"]
-  }],
+  recommendation: "contact",
   matches: [{
     claim: "招聘 SaaS 经历匹配",
     jobEvidence: ["负责招聘 SaaS 产品"],
     candidateEvidence: ["负责招聘 SaaS 从 0 到 1 上线"]
+  }, {
+    claim: "企业软件经历匹配",
+    jobEvidence: ["岗位要求企业软件产品经验"],
+    candidateEvidence: ["候选人来自企业软件公司"]
   }],
-  mismatches: [],
-  risks: [{
+  concerns: [{
     claim: "到岗时间未知",
     jobEvidence: ["岗位希望尽快到岗"],
     candidateEvidence: ["到岗时间待确认"]
-  }],
-  missingInformation: [{
+  }, {
     claim: "团队规模未提供",
     jobEvidence: ["岗位包含团队管理职责"],
     candidateEvidence: ["候选人材料未说明团队规模"]
   }],
   verificationQuestions: ["最快到岗时间是什么时候？"],
-  outreachAdvice: ["从招聘 SaaS 业务影响力切入"],
   recruiterConclusion: "建议优先沟通并核实到岗时间。"
 };
 
@@ -223,13 +210,10 @@ describe("complete recruiter workflow", () => {
 
     expect(await screen.findByRole("heading", { name: "甲公司 · 人选匹配报告" })).toBeTruthy();
     expect(screen.getByText("86")).toBeTruthy();
-    expect(screen.getByText("建议优先联系")).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "匹配项" })).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "不匹配项" })).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "风险提示" })).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "缺失信息" })).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "核实问题" })).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "沟通建议" })).toBeTruthy();
+    expect(screen.getByText("建议联系")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "主要匹配理由" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "主要顾虑或信息缺口" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "建议核实问题" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "猎头结论" })).toBeTruthy();
 
     expect(deps.extractCurrentCandidate).toHaveBeenCalledTimes(1);

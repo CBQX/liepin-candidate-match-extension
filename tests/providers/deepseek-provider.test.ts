@@ -10,7 +10,6 @@ import {
   type ModelProvider
 } from "../../src/providers/model-provider";
 import {
-  dimensionIds,
   type ModelMatchResult
 } from "../../src/shared/contracts/matching";
 import type {
@@ -52,9 +51,7 @@ const input: CandidateMatchInput = {
     skills: { text: "需求分析", status: "complete" },
     other: { text: "", status: "missing" },
     extractionConfidence: "high"
-  },
-  criteria: [{ id: "c-1", text: "五年产品经验", priority: "hard", source: "profile" }],
-  ruleEvaluations: [{ criterionId: "c-1", status: "met", evidence: ["五年企业软件产品经验"] }]
+  }
 };
 
 const jobProfileInput: JobProfileInput = {
@@ -81,22 +78,20 @@ const modelProfile: ModelRecruitmentProfile = {
 };
 
 const modelResult: ModelMatchResult = {
-  dimensionScores: dimensionIds.map((dimensionId) => ({
-    dimensionId,
-    score: 90,
-    evidence: ["候选人明确具备五年产品经验"]
-  })),
+  overallScore: 90,
+  recommendation: "contact",
   matches: [{
     claim: "产品经验匹配",
     jobEvidence: ["岗位要求五年产品经验"],
     candidateEvidence: ["候选人有五年企业软件产品经验"]
+  }, {
+    claim: "交付经验匹配",
+    jobEvidence: ["岗位要求负责企业软件产品交付"],
+    candidateEvidence: ["候选人负责过产品上线"]
   }],
-  mismatches: [],
-  risks: [],
-  missingInformation: [],
+  concerns: [],
   verificationQuestions: ["请核实团队协作范围"],
-  outreachAdvice: ["从企业软件经验切入"],
-  recruiterConclusion: "建议推进"
+  recruiterConclusion: "建议联系并核实团队协作范围"
 };
 
 type Fetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
@@ -248,6 +243,8 @@ describe("DeepSeekProvider", () => {
     const firstBody = JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body));
     const retryBody = JSON.parse(String(fetcher.mock.calls[1]?.[1]?.body));
     expect(firstBody.messages[1].content).toContain(jobProfileInput.jd);
+    expect(firstBody.model).toBe("deepseek-v4-pro");
+    expect(firstBody.max_tokens).toBe(4096);
     expect(firstBody.response_format).toEqual({ type: "json_object" });
     expect(retryBody.messages.at(-1).content).toMatch(/上一次.*修复.*完整 JSON/s);
   });
@@ -265,8 +262,8 @@ describe("DeepSeekProvider", () => {
     expect(await fake.analyzeCandidate!(input, settings)).toEqual(modelResult);
   });
 
-  it("requests strict JSON analysis with the selected V4 model", async () => {
-    // Break caught: losing any DeepSeek JSON-mode parameter could return prose or use the wrong cost/quality model.
+  it("forces candidate analysis to V4 Flash with the approved 8192-token cap", async () => {
+    // Break caught: reusing the profile model here would lose the candidate-speed strategy.
     const fetcher = vi.fn<Fetcher>().mockResolvedValue(completion(JSON.stringify(modelResult)));
 
     const result = await new DeepSeekProvider(fetcher).analyzeCandidate(input, settings);
@@ -275,7 +272,8 @@ describe("DeepSeekProvider", () => {
 
     expect(result).toEqual(modelResult);
     expect(body.response_format).toEqual({ type: "json_object" });
-    expect(body.model).toBe("deepseek-v4-pro");
+    expect(body.model).toBe("deepseek-v4-flash");
+    expect(body.max_tokens).toBe(8192);
     expect(body.thinking).toEqual({ type: "disabled" });
     expect(init?.headers).toMatchObject({ Authorization: "Bearer sk-test" });
   });
@@ -302,6 +300,8 @@ describe("DeepSeekProvider", () => {
 
     expect(fetcher).toHaveBeenCalledTimes(2);
     const retryBody = JSON.parse(String(fetcher.mock.calls[1]?.[1]?.body));
+    expect(retryBody.model).toBe("deepseek-v4-flash");
+    expect(retryBody.max_tokens).toBe(8192);
     expect(retryBody.messages.at(-1).content).toMatch(/上一次.*修复.*完整 JSON/s);
   });
 
@@ -343,14 +343,11 @@ describe("DeepSeekProvider", () => {
     expect(fetcher).toHaveBeenCalledTimes(2);
   });
 
-  it("retries and rejects dimension scores without evidence", async () => {
-    // Break caught: structurally present but evidence-free scores could bypass the provider repair path.
+  it("retries and rejects lightweight matches without candidate evidence", async () => {
+    // Break caught: a fast response must not trade away auditable two-sided evidence.
     const evidenceFreeResult = {
       ...modelResult,
-      dimensionScores: modelResult.dimensionScores.map((dimension) => ({
-        ...dimension,
-        evidence: []
-      }))
+      matches: modelResult.matches.map((match) => ({ ...match, candidateEvidence: [] }))
     };
     const fetcher = vi.fn<Fetcher>()
       .mockResolvedValueOnce(completion(JSON.stringify(evidenceFreeResult)))
@@ -362,11 +359,11 @@ describe("DeepSeekProvider", () => {
     expect(fetcher).toHaveBeenCalledTimes(2);
   });
 
-  it("repairs an incomplete dimension response once before accepting all six dimensions", async () => {
-    // Break caught: schema validation at only the composer is too late to exercise the provider's repair path.
+  it("repairs a response with too few matching reasons before accepting the bounded result", async () => {
+    // Break caught: accepting one generic reason would violate the lightweight result's minimum usefulness.
     const incomplete = {
       ...modelResult,
-      dimensionScores: modelResult.dimensionScores.slice(0, 5)
+      matches: modelResult.matches.slice(0, 1)
     };
     const fetcher = vi.fn<Fetcher>()
       .mockResolvedValueOnce(completion(JSON.stringify(incomplete)))
@@ -374,6 +371,18 @@ describe("DeepSeekProvider", () => {
 
     await expect(new DeepSeekProvider(fetcher).analyzeCandidate(input, settings)).resolves.toEqual(modelResult);
     expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
+  it("maps an unavailable Flash candidate model to MODEL_UNAVAILABLE", async () => {
+    // Break caught: a forced model that is unavailable must not look like a generic invalid request.
+    const fetcher = vi.fn<Fetcher>().mockResolvedValue(
+      apiError(400, "model_not_found", "deepseek-v4-flash model is unavailable")
+    );
+
+    const error = await caught(new DeepSeekProvider(fetcher).analyzeCandidate(input, settings));
+
+    expect(mapProviderError(error)).toMatchObject({ code: "MODEL_UNAVAILABLE" });
+    expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
   it("maps HTTP 401 to INVALID_API_KEY without retrying", async () => {

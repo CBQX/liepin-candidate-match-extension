@@ -5,9 +5,7 @@ import type {
   ModelRecruitmentProfile
 } from "../shared/contracts/recruitment-profile";
 import type {
-  JobCriterion,
-  ModelMatchResult,
-  RuleEvaluation
+  ModelMatchResult
 } from "../shared/contracts/matching";
 import type { ProviderSettings } from "../repositories/chrome-provider-settings";
 import { appErrorCodeSchema, type AppError, type AppErrorCode } from "../shared/errors";
@@ -17,8 +15,6 @@ export type JobProfileInput = Pick<Job, "company" | "jd" | "customRequirements">
 export interface CandidateMatchInput {
   recruitmentProfile: ConfirmedRecruitmentProfile;
   candidateDraft: CandidateDraft;
-  criteria: readonly JobCriterion[];
-  ruleEvaluations: readonly RuleEvaluation[];
 }
 
 export interface ProviderModelMetadata {

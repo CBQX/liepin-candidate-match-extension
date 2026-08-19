@@ -10,11 +10,13 @@ export const dimensionIds = [
 ] as const;
 
 export const requirementStatuses = ["met", "not_met", "unknown"] as const;
-export const recommendations = [
-  "strong_recommend", "recommend", "cautious", "not_recommend"
+export const contactRecommendations = [
+  "contact", "verify_before_contact", "deprioritize"
 ] as const;
 
 const requiredText = z.string().trim().min(1);
+const conciseAnalysisText = requiredText.max(300);
+const conciseConclusion = requiredText.max(600);
 
 export const jobCriterionSchema = z.object({
   id: requiredText,
@@ -41,56 +43,26 @@ export const ruleEvaluationSchema = z.object({
 
 export type RuleEvaluation = z.infer<typeof ruleEvaluationSchema>;
 
-export const dimensionScoreSchema = z.object({
-  dimensionId: z.enum(dimensionIds),
-  score: z.number().int().min(0).max(100),
-  evidence: z.array(requiredText).min(1)
-});
-
-export type DimensionScore = z.infer<typeof dimensionScoreSchema>;
-
 export const qualitativeEvidenceSchema = z.object({
-  claim: requiredText,
-  jobEvidence: z.array(requiredText).min(1),
-  candidateEvidence: z.array(requiredText).min(1)
+  claim: conciseAnalysisText,
+  jobEvidence: z.array(conciseAnalysisText).min(1).max(2),
+  candidateEvidence: z.array(conciseAnalysisText).min(1).max(2)
 });
 
 export type QualitativeEvidence = z.infer<typeof qualitativeEvidenceSchema>;
 
-const exactDimensionScoresSchema = z.array(dimensionScoreSchema)
-  .length(dimensionIds.length)
-  .superRefine((scores, context) => {
-    const counts = new Map<string, number>();
-    for (const { dimensionId } of scores) {
-      counts.set(dimensionId, (counts.get(dimensionId) ?? 0) + 1);
-    }
-    if (dimensionIds.some((dimensionId) => counts.get(dimensionId) !== 1)) {
-      context.addIssue({
-        code: "custom",
-        message: "Every matching dimension must appear exactly once"
-      });
-    }
-  });
-
 const modelAnalysisSchema = z.object({
-  dimensionScores: exactDimensionScoresSchema,
-  matches: z.array(qualitativeEvidenceSchema),
-  mismatches: z.array(qualitativeEvidenceSchema),
-  risks: z.array(qualitativeEvidenceSchema),
-  missingInformation: z.array(qualitativeEvidenceSchema),
-  verificationQuestions: z.array(requiredText),
-  outreachAdvice: z.array(requiredText),
-  recruiterConclusion: requiredText
+  overallScore: z.number().int().min(0).max(100),
+  recommendation: z.enum(contactRecommendations),
+  matches: z.array(qualitativeEvidenceSchema).min(2).max(5),
+  concerns: z.array(qualitativeEvidenceSchema).max(3),
+  verificationQuestions: z.array(conciseAnalysisText).max(3),
+  recruiterConclusion: conciseConclusion
 });
 
 export const modelMatchResultSchema = modelAnalysisSchema;
 export type ModelMatchResult = z.infer<typeof modelMatchResultSchema>;
 
-export const matchAnalysisSchema = modelAnalysisSchema.extend({
-  overallScore: z.number().int().min(0).max(100),
-  recommendation: z.enum(recommendations),
-  confidence: z.enum(["high", "medium", "low"]),
-  hardRequirements: z.array(ruleEvaluationSchema)
-});
+export const matchAnalysisSchema = modelAnalysisSchema;
 
 export type MatchAnalysis = z.infer<typeof matchAnalysisSchema>;

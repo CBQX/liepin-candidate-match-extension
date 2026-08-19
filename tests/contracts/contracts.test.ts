@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { jobSchema } from "../../src/shared/contracts/job";
 import {
-  dimensionIds,
   matchAnalysisSchema,
   modelMatchResultSchema,
   ruleEvaluationSchema
@@ -9,18 +8,24 @@ import {
 import { runtimeRequestSchema } from "../../src/shared/contracts/messages";
 
 const evidenceBackedModelResult = {
-  dimensionScores: dimensionIds.map((dimensionId) => ({
-    dimensionId,
-    score: 80,
-    evidence: ["岗位与候选人材料中的明确依据"]
-  })),
-  matches: [],
-  mismatches: [],
-  risks: [],
-  missingInformation: [],
-  verificationQuestions: [],
-  outreachAdvice: [],
-  recruiterConclusion: "建议推进"
+  overallScore: 82,
+  recommendation: "contact",
+  matches: [{
+    claim: "核心产品经验匹配",
+    jobEvidence: ["岗位要求负责企业软件产品"],
+    candidateEvidence: ["候选人曾负责企业软件产品"]
+  }, {
+    claim: "项目交付经验匹配",
+    jobEvidence: ["岗位要求推动复杂项目交付"],
+    candidateEvidence: ["候选人材料明确列出跨团队交付经历"]
+  }],
+  concerns: [{
+    claim: "团队规模尚需核实",
+    jobEvidence: ["岗位要求管理跨职能团队"],
+    candidateEvidence: ["候选人材料未提供团队人数"]
+  }],
+  verificationQuestions: ["请核实直接管理人数", "请核实海外业务占比"],
+  recruiterConclusion: "匹配度较高，建议联系并核实团队规模。"
 };
 
 describe("runtime contracts", () => {
@@ -73,45 +78,50 @@ describe("runtime contracts", () => {
     }).success).toBe(false);
   });
 
-  it("rejects out-of-range analysis scores", () => {
-    expect(matchAnalysisSchema.safeParse({
-      overallScore: 101,
-      recommendation: "strong_recommend",
-      confidence: "high",
-      dimensionScores: [],
-      hardRequirements: [],
-      matches: [], mismatches: [], risks: [], missingInformation: [],
-      verificationQuestions: [], outreachAdvice: [], recruiterConclusion: "推进"
-    }).success).toBe(false);
+  it("accepts the lightweight evidence-backed result contract", () => {
+    expect(modelMatchResultSchema.parse(evidenceBackedModelResult)).toEqual(evidenceBackedModelResult);
+    expect(matchAnalysisSchema.parse(evidenceBackedModelResult)).toEqual(evidenceBackedModelResult);
   });
 
-  it("rejects a dimension score without supporting evidence", () => {
-    // Break caught: an evidence-free score could pass runtime validation and appear authoritative in the UI.
+  it("rejects out-of-range analysis scores and unknown contact recommendations", () => {
     expect(modelMatchResultSchema.safeParse({
       ...evidenceBackedModelResult,
-      dimensionScores: [{
-        ...evidenceBackedModelResult.dimensionScores[0],
-        evidence: []
-      }]
-    }).success).toBe(false);
-  });
-
-  it("requires every matching dimension exactly once in model output", () => {
-    // Break caught: incomplete or duplicate dimensions must trigger the provider repair request, not reach composition.
-    expect(modelMatchResultSchema.safeParse({
-      ...evidenceBackedModelResult,
-      dimensionScores: evidenceBackedModelResult.dimensionScores.slice(0, 5)
+      overallScore: 101
     }).success).toBe(false);
     expect(modelMatchResultSchema.safeParse({
       ...evidenceBackedModelResult,
-      dimensionScores: [
-        ...evidenceBackedModelResult.dimensionScores.slice(0, 5),
-        evidenceBackedModelResult.dimensionScores[0]
-      ]
+      recommendation: "reject"
     }).success).toBe(false);
   });
 
-  it.each(["matches", "mismatches", "risks", "missingInformation"] as const)(
+  it.each([
+    ["one match", { matches: evidenceBackedModelResult.matches.slice(0, 1) }],
+    ["six matches", { matches: Array.from({ length: 6 }, () => evidenceBackedModelResult.matches[0]) }],
+    ["four concerns", { concerns: Array.from({ length: 4 }, () => evidenceBackedModelResult.concerns[0]) }],
+    ["four questions", { verificationQuestions: ["一", "二", "三", "四"] }]
+  ])("rejects a lightweight result with %s", (_label, override) => {
+    // Break caught: unbounded or underspecified results recreate the slow, verbose candidate response.
+    expect(modelMatchResultSchema.safeParse({
+      ...evidenceBackedModelResult,
+      ...override
+    }).success).toBe(false);
+  });
+
+  it("rejects an unbounded conclusion or evidence paragraph", () => {
+    // Break caught: a single oversized string could consume the 8192-token allowance despite bounded item counts.
+    expect(modelMatchResultSchema.safeParse({
+      ...evidenceBackedModelResult,
+      recruiterConclusion: "结".repeat(601)
+    }).success).toBe(false);
+    expect(modelMatchResultSchema.safeParse({
+      ...evidenceBackedModelResult,
+      matches: evidenceBackedModelResult.matches.map((match, index) => index === 0
+        ? { ...match, candidateEvidence: ["证".repeat(301)] }
+        : match)
+    }).success).toBe(false);
+  });
+
+  it.each(["matches", "concerns"] as const)(
     "rejects an evidence-free conclusion in %s",
     (section) => {
       // Break caught: a qualitative claim could omit either job-side or candidate-side proof promised by the protocol.
