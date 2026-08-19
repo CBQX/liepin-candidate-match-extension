@@ -268,6 +268,82 @@ describe("two-line job selector", () => {
     expect(trigger.getAttribute("aria-expanded")).toBe("false");
     expect(screen.queryByRole("listbox")).toBeNull();
   });
+
+  it("closes without switching when keyboard focus leaves the selector", async () => {
+    // Break caught: tabbing onward must not leave a stale listbox covering the next side-panel control.
+    const onChange = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <JobSelector
+        jobs={[jobA, jobB]}
+        activeJobId={jobA.id}
+        onChange={onChange}
+        onAdd={vi.fn()}
+      />
+    );
+
+    const trigger = screen.getByRole("combobox", { name: "当前岗位" });
+    await user.click(trigger);
+    expect(screen.getByRole("listbox")).toBeTruthy();
+
+    await user.tab();
+
+    expect(screen.getByRole("button", { name: "添加新岗位" })).toBe(document.activeElement);
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("keeps the keyboard-highlighted option visible in a long job list", async () => {
+    // Break caught: aria-activedescendant can move beyond the scroll window while Enter still selects the hidden option.
+    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+      configurable: true,
+      value: scrollIntoView
+    });
+
+    try {
+      const jobs = Array.from({ length: 6 }, (_, index): Job => ({
+        ...jobA,
+        id: `job-long-${index + 1}`,
+        company: `公司 ${index + 1}`,
+        recruitmentProfile: {
+          ...confirmedProfile,
+          roleTitle: `岗位 ${index + 1}`
+        }
+      }));
+      const user = userEvent.setup();
+      render(
+        <JobSelector
+          jobs={jobs}
+          activeJobId={jobs[0].id}
+          onChange={vi.fn()}
+          onAdd={vi.fn()}
+        />
+      );
+
+      const trigger = screen.getByRole("combobox", { name: "当前岗位" });
+      await user.click(trigger);
+      await user.keyboard("{End}");
+
+      const lastOption = screen.getByRole("option", { name: /岗位 6.*公司 6/u });
+      await waitFor(() => {
+        expect(scrollIntoView).toHaveBeenLastCalledWith({ block: "nearest" });
+        expect(scrollIntoView.mock.instances.at(-1)).toBe(lastOption);
+      });
+      expect(trigger.getAttribute("aria-activedescendant")).toBe(lastOption.id);
+    } finally {
+      if (originalScrollIntoView) {
+        Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+          configurable: true,
+          value: originalScrollIntoView
+        });
+      } else {
+        Reflect.deleteProperty(HTMLElement.prototype, "scrollIntoView");
+      }
+    }
+  });
 });
 
 describe("side-panel jobs", () => {

@@ -13,7 +13,7 @@
 ### 开发交付验证记录（不等同于浏览器人工验收）
 
 - 日期：2026-08-19
-- `npm run verify`：通过；TypeScript 类型检查、25 个测试文件 / 355 项测试和生产构建均通过
+- `npm run verify`：通过；TypeScript 类型检查、25 个测试文件 / 357 项测试和生产构建均通过
 - Node 20 依赖引擎静态检查：`package-lock.json` 中 132 项 Node 引擎声明全部接受 Node 20.19.0；本次自动化实际运行时为 Node 24.16.0，目标电脑仍应按上方清单使用 Node 20.19.0+ 复核
 - `dist/` 静态完整性：通过，包含 `manifest.json`、`sidepanel.html`、`background.js`、`content.js`、侧边栏 JS/CSS 资源
 - 权限静态检查：通过，Manifest V3、最低 Chrome 116；权限为 `sidePanel`、`storage`；主机范围为猎聘和 DeepSeek API

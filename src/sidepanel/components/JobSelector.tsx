@@ -21,6 +21,7 @@ export function JobSelector({ jobs, activeJobId, disabled, onChange, onAdd }: Jo
   const [open, setOpen] = useState(false);
   const [focusedIndex, setFocusedIndex] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
+  const optionRefs = useRef<Array<HTMLLIElement | null>>([]);
   const labelId = useId();
   const listboxId = useId();
   const activeIndex = jobs.findIndex((job) => job.id === activeJobId);
@@ -36,6 +37,11 @@ export function JobSelector({ jobs, activeJobId, disabled, onChange, onAdd }: Jo
     document.addEventListener("pointerdown", closeOnOutsidePointer);
     return () => document.removeEventListener("pointerdown", closeOnOutsidePointer);
   }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    optionRefs.current[focusedIndex]?.scrollIntoView?.({ block: "nearest" });
+  }, [focusedIndex, open]);
 
   function openMenu() {
     if (disabled || jobs.length === 0) return;
@@ -102,7 +108,13 @@ export function JobSelector({ jobs, activeJobId, disabled, onChange, onAdd }: Jo
 
   return (
     <section className="job-toolbar" aria-label="岗位选择">
-      <div className="job-selector" ref={containerRef}>
+      <div
+        className="job-selector"
+        ref={containerRef}
+        onBlur={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOpen(false);
+        }}
+      >
         <span className="job-selector-label" id={labelId}>当前岗位</span>
         <button
           className="job-select-trigger"
@@ -135,6 +147,9 @@ export function JobSelector({ jobs, activeJobId, disabled, onChange, onAdd }: Jo
                   className={`job-select-option${focused ? " job-select-option-focused" : ""}`}
                   id={`${listboxId}-option-${index}`}
                   key={job.id}
+                  ref={(element) => {
+                    optionRefs.current[index] = element;
+                  }}
                   role="option"
                   aria-label={`${display.roleTitle}，${display.company}`}
                   aria-selected={selected}
