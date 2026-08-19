@@ -10,6 +10,13 @@
 
 **Spec:** `docs/superpowers/specs/2026-08-18-liepin-candidate-match-extension-design.md`
 
+> **Superseding two-stage workflow note (2026-08-19):**
+> `docs/superpowers/plans/2026-08-18-two-stage-job-profile.md` implements the approved
+> two-stage recruitment-profile workflow. Its job creation, provider interface,
+> confirmed-profile persistence, weighting, contact recommendations, legacy-job
+> compatibility, and synthetic test decisions supersede the corresponding tasks below.
+> The original plan remains as historical implementation context.
+
 > **Superseding implementation note (2026-08-18):** The original plan used
 > `chrome.storage.local` for persistent jobs and remembered provider settings. Final
 > security review replaced that medium with extension-origin IndexedDB. The original
