@@ -1,16 +1,28 @@
 import { describe, expect, it } from "vitest";
 import { buildAnalysisPrompt } from "../../src/providers/deepseek/prompt";
-import type { MatchInput } from "../../src/providers/model-provider";
+import type { CandidateMatchInput } from "../../src/providers/model-provider";
+import type { ConfirmedRecruitmentProfile } from "../../src/shared/contracts/recruitment-profile";
 
-const input: MatchInput = {
-  job: {
-    id: "job-1",
-    company: "甲公司",
-    jd: "负责企业软件产品，要求五年产品经验",
-    customRequirements: "需要带领跨职能团队",
-    createdAt: "2026-08-18T00:00:00.000Z",
-    updatedAt: "2026-08-18T00:00:00.000Z"
-  },
+const recruitmentProfile: ConfirmedRecruitmentProfile = {
+  version: 1,
+  roleTitle: "企业软件产品经理",
+  roleObjective: "负责企业软件产品交付",
+  requirements: [{
+    id: "criterion-1",
+    text: "五年产品经验",
+    priority: "hard",
+    dimensionId: "functional_expertise",
+    weight: 100,
+    jobEvidence: ["岗位要求五年产品经验"]
+  }],
+  acceptableAlternatives: [],
+  ambiguities: [],
+  verificationQuestions: [],
+  confirmedAt: "2026-08-19T00:00:00.000Z"
+};
+
+const input: CandidateMatchInput = {
+  recruitmentProfile,
   candidateDraft: {
     basics: { text: "候选人，上海", status: "complete" },
     workExperience: { text: "四年企业软件产品经验", status: "complete" },
@@ -24,7 +36,7 @@ const input: MatchInput = {
     id: "criterion-1",
     text: "五年产品经验",
     priority: "hard",
-    source: "jd"
+    source: "profile"
   }],
   ruleEvaluations: [{
     criterionId: "criterion-1",
@@ -66,13 +78,22 @@ describe("buildAnalysisPrompt", () => {
     expect(system).toContain("不得把未知信息判定为不满足");
   });
 
-  it("supplies the job, candidate, criteria, and rule evidence to the model", () => {
+  it("supplies the confirmed profile, candidate, criteria, and rule evidence to the model", () => {
     // Break caught: dropping an input section makes evidence-grounded comparison impossible.
     const { user } = buildAnalysisPrompt(input);
 
-    expect(user).toContain("甲公司");
+    expect(user).toContain("企业软件产品经理");
     expect(user).toContain("四年企业软件产品经验");
     expect(user).toContain("五年产品经验");
     expect(user).toContain("候选人仅明确提供四年经验");
+  });
+
+  it("does not contain raw job fields that are outside the confirmed profile", () => {
+    const { user } = buildAnalysisPrompt(input);
+
+    expect(user).not.toContain("原始超长 JD 唯一标记");
+    expect(user).not.toContain("原始个性化要求唯一标记");
+    expect(user).not.toContain('"jd"');
+    expect(user).not.toContain('"customRequirements"');
   });
 });

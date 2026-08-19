@@ -5,12 +5,18 @@ import {
 } from "../../src/providers/deepseek/deepseek-provider";
 import {
   ModelProviderRegistry,
-  type MatchInput
+  type CandidateMatchInput,
+  type JobProfileInput,
+  type ModelProvider
 } from "../../src/providers/model-provider";
 import {
   dimensionIds,
   type ModelMatchResult
 } from "../../src/shared/contracts/matching";
+import type {
+  ModelRecruitmentProfile,
+  ConfirmedRecruitmentProfile
+} from "../../src/shared/contracts/recruitment-profile";
 
 const settings = {
   providerId: "deepseek",
@@ -18,15 +24,26 @@ const settings = {
   apiKey: "sk-test"
 };
 
-const input: MatchInput = {
-  job: {
-    id: "job-1",
-    company: "甲公司",
-    jd: "五年产品经验",
-    customRequirements: "企业软件经验优先",
-    createdAt: "2026-08-18T00:00:00.000Z",
-    updatedAt: "2026-08-18T00:00:00.000Z"
-  },
+const confirmedProfile: ConfirmedRecruitmentProfile = {
+  version: 1,
+  roleTitle: "企业软件产品经理",
+  roleObjective: "负责虚构企业软件产品",
+  requirements: [{
+    id: "c-1",
+    text: "五年产品经验",
+    priority: "hard",
+    dimensionId: "functional_expertise",
+    weight: 100,
+    jobEvidence: ["岗位要求五年产品经验"]
+  }],
+  acceptableAlternatives: [],
+  ambiguities: [],
+  verificationQuestions: [],
+  confirmedAt: "2026-08-19T00:00:00.000Z"
+};
+
+const input: CandidateMatchInput = {
+  recruitmentProfile: confirmedProfile,
   candidateDraft: {
     basics: { text: "候选人，上海", status: "complete" },
     workExperience: { text: "五年企业软件产品经验", status: "complete" },
@@ -36,8 +53,31 @@ const input: MatchInput = {
     other: { text: "", status: "missing" },
     extractionConfidence: "high"
   },
-  criteria: [{ id: "c-1", text: "五年产品经验", priority: "hard", source: "jd" }],
+  criteria: [{ id: "c-1", text: "五年产品经验", priority: "hard", source: "profile" }],
   ruleEvaluations: [{ criterionId: "c-1", status: "met", evidence: ["五年企业软件产品经验"] }]
+};
+
+const jobProfileInput: JobProfileInput = {
+  company: "虚构甲公司",
+  jd: "负责虚构企业软件产品，要求五年产品经验",
+  customRequirements: "企业软件经验优先"
+};
+
+const modelProfile: ModelRecruitmentProfile = {
+  version: 1,
+  roleTitle: "企业软件产品经理",
+  roleObjective: "负责虚构企业软件产品",
+  requirements: [{
+    id: "requirement-1",
+    text: "五年产品经验",
+    priority: "hard",
+    dimensionId: "functional_expertise",
+    weight: 100,
+    jobEvidence: ["要求五年产品经验"]
+  }],
+  acceptableAlternatives: [],
+  ambiguities: [],
+  verificationQuestions: []
 };
 
 const modelResult: ModelMatchResult = {
@@ -195,11 +235,42 @@ describe("DeepSeekProvider", () => {
     });
   });
 
+  it("generates and validates a recruitment profile with one bounded repair", async () => {
+    const fetcher = vi.fn<Fetcher>()
+      .mockResolvedValueOnce(completion(JSON.stringify({ recruiterConclusion: "wrong contract" })))
+      .mockResolvedValueOnce(completion(JSON.stringify(modelProfile)));
+
+    const result = await new DeepSeekProvider(fetcher)
+      .generateRecruitmentProfile(jobProfileInput, settings);
+
+    expect(result).toEqual(modelProfile);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    const firstBody = JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body));
+    const retryBody = JSON.parse(String(fetcher.mock.calls[1]?.[1]?.body));
+    expect(firstBody.messages[1].content).toContain(jobProfileInput.jd);
+    expect(firstBody.response_format).toEqual({ type: "json_object" });
+    expect(retryBody.messages.at(-1).content).toMatch(/上一次.*修复.*完整 JSON/s);
+  });
+
+  it("supports a second provider through the same two-operation contract", async () => {
+    const fake: ModelProvider = {
+      id: "fake-provider",
+      models: [{ id: "fake-model", label: "Fake Model" }],
+      validateCredentials: vi.fn(async () => undefined),
+      generateRecruitmentProfile: vi.fn(async () => modelProfile),
+      analyzeCandidate: vi.fn(async () => modelResult),
+      analyze: vi.fn(async () => modelResult)
+    };
+
+    expect(await fake.generateRecruitmentProfile!(jobProfileInput, settings)).toEqual(modelProfile);
+    expect(await fake.analyzeCandidate!(input, settings)).toEqual(modelResult);
+  });
+
   it("requests strict JSON analysis with the selected V4 model", async () => {
     // Break caught: losing any DeepSeek JSON-mode parameter could return prose or use the wrong cost/quality model.
     const fetcher = vi.fn<Fetcher>().mockResolvedValue(completion(JSON.stringify(modelResult)));
 
-    const result = await new DeepSeekProvider(fetcher).analyze(input, settings);
+    const result = await new DeepSeekProvider(fetcher).analyzeCandidate(input, settings);
     const init = fetcher.mock.calls[0]?.[1];
     const body = JSON.parse(String(init?.body));
 
@@ -214,7 +285,7 @@ describe("DeepSeekProvider", () => {
     // Break caught: forwarding an arbitrary stored model id would bypass the adapter's exact V4 allowlist.
     const fetcher = vi.fn<Fetcher>().mockResolvedValue(completion(JSON.stringify(modelResult)));
 
-    await expect(new DeepSeekProvider(fetcher).analyze(input, {
+    await expect(new DeepSeekProvider(fetcher).analyzeCandidate(input, {
       ...settings,
       model: "deepseek-v3"
     })).rejects.toMatchObject({ code: "INVALID_PROVIDER_SETTINGS" });
@@ -228,7 +299,7 @@ describe("DeepSeekProvider", () => {
       .mockResolvedValueOnce(completion(""))
       .mockResolvedValueOnce(completion(JSON.stringify(modelResult)));
 
-    await expect(new DeepSeekProvider(fetcher).analyze(input, settings)).resolves.toEqual(modelResult);
+    await expect(new DeepSeekProvider(fetcher).analyzeCandidate(input, settings)).resolves.toEqual(modelResult);
 
     expect(fetcher).toHaveBeenCalledTimes(2);
     const retryBody = JSON.parse(String(fetcher.mock.calls[1]?.[1]?.body));
@@ -241,7 +312,7 @@ describe("DeepSeekProvider", () => {
       .mockResolvedValueOnce(completion(JSON.stringify(modelResult), "length"))
       .mockResolvedValueOnce(completion(JSON.stringify(modelResult)));
 
-    await expect(new DeepSeekProvider(fetcher).analyze(input, settings)).resolves.toEqual(modelResult);
+    await expect(new DeepSeekProvider(fetcher).analyzeCandidate(input, settings)).resolves.toEqual(modelResult);
     expect(fetcher).toHaveBeenCalledTimes(2);
   });
 
@@ -254,7 +325,7 @@ describe("DeepSeekProvider", () => {
       }))
       .mockResolvedValueOnce(completion(JSON.stringify(modelResult)));
 
-    await expect(new DeepSeekProvider(fetcher).analyze(input, settings)).resolves.toEqual(modelResult);
+    await expect(new DeepSeekProvider(fetcher).analyzeCandidate(input, settings)).resolves.toEqual(modelResult);
 
     expect(fetcher).toHaveBeenCalledTimes(2);
     const retryBody = JSON.parse(String(fetcher.mock.calls[1]?.[1]?.body));
@@ -267,7 +338,7 @@ describe("DeepSeekProvider", () => {
       .mockResolvedValueOnce(completion("not json"))
       .mockResolvedValueOnce(completion(JSON.stringify({ recruiterConclusion: "不完整" })));
 
-    const error = await caught(new DeepSeekProvider(fetcher).analyze(input, settings));
+    const error = await caught(new DeepSeekProvider(fetcher).analyzeCandidate(input, settings));
 
     expect(mapProviderError(error)).toMatchObject({ code: "INVALID_MODEL_OUTPUT" });
     expect(fetcher).toHaveBeenCalledTimes(2);
@@ -286,7 +357,7 @@ describe("DeepSeekProvider", () => {
       .mockResolvedValueOnce(completion(JSON.stringify(evidenceFreeResult)))
       .mockResolvedValueOnce(completion(JSON.stringify(evidenceFreeResult)));
 
-    const error = await caught(new DeepSeekProvider(fetcher).analyze(input, settings));
+    const error = await caught(new DeepSeekProvider(fetcher).analyzeCandidate(input, settings));
 
     expect(mapProviderError(error)).toMatchObject({ code: "INVALID_MODEL_OUTPUT" });
     expect(fetcher).toHaveBeenCalledTimes(2);
@@ -302,7 +373,7 @@ describe("DeepSeekProvider", () => {
       .mockResolvedValueOnce(completion(JSON.stringify(incomplete)))
       .mockResolvedValueOnce(completion(JSON.stringify(modelResult)));
 
-    await expect(new DeepSeekProvider(fetcher).analyze(input, settings)).resolves.toEqual(modelResult);
+    await expect(new DeepSeekProvider(fetcher).analyzeCandidate(input, settings)).resolves.toEqual(modelResult);
     expect(fetcher).toHaveBeenCalledTimes(2);
   });
 
@@ -312,7 +383,7 @@ describe("DeepSeekProvider", () => {
       apiError(401, "invalid_api_key", "Authentication Fails")
     );
 
-    const error = await caught(new DeepSeekProvider(fetcher).analyze(input, settings));
+    const error = await caught(new DeepSeekProvider(fetcher).analyzeCandidate(input, settings));
 
     expect(mapProviderError(error)).toMatchObject({ code: "INVALID_API_KEY" });
     expect(fetcher).toHaveBeenCalledTimes(1);
@@ -324,7 +395,7 @@ describe("DeepSeekProvider", () => {
       apiError(429, "rate_limit_exceeded", "Rate limit reached")
     );
 
-    const error = await caught(new DeepSeekProvider(fetcher).analyze(input, settings));
+    const error = await caught(new DeepSeekProvider(fetcher).analyzeCandidate(input, settings));
 
     expect(mapProviderError(error)).toMatchObject({ code: "RATE_LIMITED" });
     expect(fetcher).toHaveBeenCalledTimes(1);
@@ -336,7 +407,7 @@ describe("DeepSeekProvider", () => {
       apiError(402, "insufficient_balance", "Insufficient Balance")
     );
 
-    const error = await caught(new DeepSeekProvider(fetcher).analyze(input, settings));
+    const error = await caught(new DeepSeekProvider(fetcher).analyzeCandidate(input, settings));
 
     expect(mapProviderError(error)).toMatchObject({ code: "INSUFFICIENT_BALANCE" });
     expect(fetcher).toHaveBeenCalledTimes(1);
@@ -361,7 +432,7 @@ describe("DeepSeekProvider", () => {
         reject(new DOMException("The operation was aborted", "AbortError"));
       });
     }));
-    const errorPromise = caught(new DeepSeekProvider(fetcher).analyze(input, settings));
+    const errorPromise = caught(new DeepSeekProvider(fetcher).analyzeCandidate(input, settings));
 
     await vi.advanceTimersByTimeAsync(25_000);
     const error = await errorPromise;
@@ -388,7 +459,7 @@ describe("DeepSeekProvider", () => {
       }));
     });
     let settled = false;
-    const errorPromise = caught(new DeepSeekProvider(fetcher).analyze(input, settings))
+    const errorPromise = caught(new DeepSeekProvider(fetcher).analyzeCandidate(input, settings))
       .then((error) => {
         settled = true;
         return error;
@@ -408,7 +479,7 @@ describe("DeepSeekProvider", () => {
     const fetcher = vi.fn<Fetcher>().mockImplementation((_url, init) => new Promise((_resolve, reject) => {
       init?.signal?.addEventListener("abort", () => reject(new DOMException("cancelled", "AbortError")));
     }));
-    const errorPromise = caught(new DeepSeekProvider(fetcher).analyze(input, settings, external.signal));
+    const errorPromise = caught(new DeepSeekProvider(fetcher).analyzeCandidate(input, settings, external.signal));
 
     external.abort();
 
@@ -422,7 +493,7 @@ describe("DeepSeekProvider", () => {
     external.abort();
     const fetcher = vi.fn<Fetcher>();
 
-    const error = await caught(new DeepSeekProvider(fetcher).analyze(input, settings, external.signal));
+    const error = await caught(new DeepSeekProvider(fetcher).analyzeCandidate(input, settings, external.signal));
 
     expect(mapProviderError(error)).toMatchObject({ code: "ANALYSIS_CANCELLED" });
     expect(fetcher).not.toHaveBeenCalled();
@@ -436,7 +507,7 @@ describe("DeepSeekProvider", () => {
       .mockImplementationOnce((_url, init) => new Promise((_resolve, reject) => {
         init?.signal?.addEventListener("abort", () => reject(new DOMException("cancelled", "AbortError")));
       }));
-    const errorPromise = caught(new DeepSeekProvider(fetcher).analyze(input, settings, external.signal));
+    const errorPromise = caught(new DeepSeekProvider(fetcher).analyzeCandidate(input, settings, external.signal));
     await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
 
     external.abort();

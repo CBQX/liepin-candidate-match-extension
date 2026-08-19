@@ -1,4 +1,4 @@
-import type { MatchInput } from "../model-provider";
+import type { CandidateMatchInput, MatchInput } from "../model-provider";
 
 export interface AnalysisPrompt {
   system: string;
@@ -25,7 +25,19 @@ const system = `你是一名严谨、合规的招聘匹配分析助手。请遵�
 7. 信息缺失必须标为 unknown 或转化为 verificationQuestions 中的核实问题；不得把未知信息判定为不满足，也不得因为材料缺失直接扣分。
 8. 规则预判仅是结构化辅助信息。若预判状态为 unknown，必须保持未知，除非其他候选人原文提供了直接证据。`;
 
-export function buildAnalysisPrompt(input: MatchInput): AnalysisPrompt {
+export function buildAnalysisPrompt(input: CandidateMatchInput): AnalysisPrompt {
+  return {
+    system,
+    user: `请根据以下完整输入进行岗位匹配分析，并严格按系统消息中的 JSON 协议返回结果：\n${JSON.stringify({
+      recruitmentProfile: input.recruitmentProfile,
+      candidateDraft: input.candidateDraft,
+      criteria: input.criteria,
+      ruleEvaluations: input.ruleEvaluations
+    }, null, 2)}`
+  };
+}
+
+export function buildLegacyAnalysisPrompt(input: MatchInput): AnalysisPrompt {
   return {
     system,
     user: `请根据以下完整输入进行岗位匹配分析，并严格按系统消息中的 JSON 协议返回结果：\n${JSON.stringify({

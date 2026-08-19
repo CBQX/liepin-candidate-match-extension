@@ -1,16 +1,24 @@
 import type { AppErrorCode } from "../../shared/errors";
+import type { ZodType } from "zod";
 import {
   modelMatchResultSchema,
   type ModelMatchResult
 } from "../../shared/contracts/matching";
+import {
+  modelRecruitmentProfileSchema,
+  type ModelRecruitmentProfile
+} from "../../shared/contracts/recruitment-profile";
 import type { ProviderSettings } from "../../repositories/chrome-provider-settings";
 import {
   mapModelProviderError,
   NormalizedProviderError,
+  type CandidateMatchInput,
+  type JobProfileInput,
   type MatchInput,
   type ModelProvider
 } from "../model-provider";
-import { buildAnalysisPrompt } from "./prompt";
+import { buildJobProfilePrompt } from "./job-profile-prompt";
+import { buildAnalysisPrompt, buildLegacyAnalysisPrompt, type AnalysisPrompt } from "./prompt";
 
 type Fetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
@@ -67,7 +75,7 @@ async function providerErrorFromResponse(response: Response): Promise<Normalized
   return new NormalizedProviderError(errorCodeFromResponse(response.status, payload));
 }
 
-function parseCompletion(payload: unknown): ModelMatchResult {
+function parseCompletion<T>(payload: unknown, schema: ZodType<T>): T {
   const choice = typeof payload === "object" && payload !== null && "choices" in payload
     ? (payload as { choices?: unknown }).choices
     : undefined;
@@ -89,7 +97,7 @@ function parseCompletion(payload: unknown): ModelMatchResult {
   }
 
   try {
-    return modelMatchResultSchema.parse(JSON.parse(content));
+    return schema.parse(JSON.parse(content));
   } catch {
     throw new NormalizedProviderError("INVALID_MODEL_OUTPUT");
   }
@@ -138,9 +146,52 @@ export class DeepSeekProvider implements ModelProvider {
     settings: ProviderSettings,
     signal?: AbortSignal
   ): Promise<ModelMatchResult> {
+    return this.requestStructured(
+      buildLegacyAnalysisPrompt(input),
+      modelMatchResultSchema,
+      settings,
+      signal,
+      8192
+    );
+  }
+
+  async generateRecruitmentProfile(
+    input: JobProfileInput,
+    settings: ProviderSettings,
+    signal?: AbortSignal
+  ): Promise<ModelRecruitmentProfile> {
+    return this.requestStructured(
+      buildJobProfilePrompt(input),
+      modelRecruitmentProfileSchema,
+      settings,
+      signal,
+      4096
+    );
+  }
+
+  async analyzeCandidate(
+    input: CandidateMatchInput,
+    settings: ProviderSettings,
+    signal?: AbortSignal
+  ): Promise<ModelMatchResult> {
+    return this.requestStructured(
+      buildAnalysisPrompt(input),
+      modelMatchResultSchema,
+      settings,
+      signal,
+      8192
+    );
+  }
+
+  private async requestStructured<T>(
+    prompt: AnalysisPrompt,
+    schema: ZodType<T>,
+    settings: ProviderSettings,
+    signal: AbortSignal | undefined,
+    maxTokens: number
+  ): Promise<T> {
     this.requireApiKey(settings);
     this.requireSupportedModel(settings);
-    const prompt = buildAnalysisPrompt(input);
 
     for (let attempt = 0; attempt < 2; attempt += 1) {
       const messages = [
@@ -160,7 +211,7 @@ export class DeepSeekProvider implements ModelProvider {
             messages,
             response_format: { type: "json_object" },
             thinking: { type: "disabled" },
-            max_tokens: 8192
+            max_tokens: maxTokens
           })
         }, async (response) => {
           if (!response.ok) {
@@ -173,7 +224,7 @@ export class DeepSeekProvider implements ModelProvider {
             throw new NormalizedProviderError("INVALID_MODEL_OUTPUT");
           }
         }, signal);
-        return parseCompletion(payload);
+        return parseCompletion(payload, schema);
       } catch (error) {
         if (
           !(error instanceof NormalizedProviderError)

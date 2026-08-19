@@ -1,6 +1,10 @@
 import type { CandidateDraft } from "../shared/contracts/candidate";
 import type { Job } from "../shared/contracts/job";
 import type {
+  ConfirmedRecruitmentProfile,
+  ModelRecruitmentProfile
+} from "../shared/contracts/recruitment-profile";
+import type {
   JobCriterion,
   ModelMatchResult,
   RuleEvaluation
@@ -15,6 +19,15 @@ export interface MatchInput {
   ruleEvaluations: readonly RuleEvaluation[];
 }
 
+export type JobProfileInput = Pick<Job, "company" | "jd" | "customRequirements">;
+
+export interface CandidateMatchInput {
+  recruitmentProfile: ConfirmedRecruitmentProfile;
+  candidateDraft: CandidateDraft;
+  criteria: readonly JobCriterion[];
+  ruleEvaluations: readonly RuleEvaluation[];
+}
+
 export interface ProviderModelMetadata {
   id: string;
   label: string;
@@ -24,6 +37,17 @@ export interface ModelProvider {
   id: string;
   models: readonly ProviderModelMetadata[];
   validateCredentials(settings: ProviderSettings): Promise<void>;
+  generateRecruitmentProfile?(
+    input: JobProfileInput,
+    settings: ProviderSettings,
+    signal?: AbortSignal
+  ): Promise<ModelRecruitmentProfile>;
+  analyzeCandidate?(
+    input: CandidateMatchInput,
+    settings: ProviderSettings,
+    signal?: AbortSignal
+  ): Promise<ModelMatchResult>;
+  /** @deprecated Removed after the candidate pipeline migrates to confirmed profiles. */
   analyze(
     input: MatchInput,
     settings: ProviderSettings,
