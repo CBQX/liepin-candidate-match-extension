@@ -1,4 +1,5 @@
 import type { Job } from "../../shared/contracts/job";
+import type { ConfirmedRecruitmentProfile } from "../../shared/contracts/recruitment-profile";
 import type { JobCriterion } from "../../shared/contracts/matching";
 
 const HARD_MARKERS = /必须|硬性|不接受|不可/;
@@ -30,4 +31,15 @@ export function parseJobCriteria(job: Job): JobCriterion[] {
       source
     }))
   );
+}
+
+export function criteriaFromRecruitmentProfile(
+  profile: ConfirmedRecruitmentProfile
+): JobCriterion[] {
+  return profile.requirements.map(({ id, text, priority }) => ({
+    id,
+    text,
+    priority,
+    source: "profile"
+  }));
 }

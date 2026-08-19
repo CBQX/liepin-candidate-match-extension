@@ -18,6 +18,23 @@ const job: Job = {
   company: "甲公司",
   jd: "负责企业招聘",
   customRequirements: "必须本科",
+  recruitmentProfile: {
+    version: 1,
+    roleTitle: "企业招聘产品经理",
+    roleObjective: "负责虚构企业招聘产品",
+    requirements: [{
+      id: "profile-degree",
+      text: "必须本科",
+      priority: "hard",
+      dimensionId: "hard_requirements",
+      weight: 100,
+      jobEvidence: ["必须本科"]
+    }],
+    acceptableAlternatives: [],
+    ambiguities: [],
+    verificationQuestions: [],
+    confirmedAt: "2026-08-19T00:00:00.000Z"
+  },
   createdAt: "2026-08-18T00:00:00.000Z",
   updatedAt: "2026-08-18T00:00:00.000Z"
 };
@@ -308,12 +325,14 @@ describe("analysis workflow", () => {
     // Break caught: cancellation could retain the edited draft but drop its private redaction context,
     // allowing a recognized name pasted into multiple sections to reach the provider on retry.
     const pending = deferred<Awaited<ReturnType<Analyze>>>();
-    const providerAnalyze = vi.fn<ModelProvider["analyze"]>().mockResolvedValue(providerResult);
+    const providerAnalyze = vi.fn<ModelProvider["analyzeCandidate"]>()
+      .mockResolvedValue(providerResult);
     const provider: ModelProvider = {
       id: "deepseek",
       models: [{ id: "deepseek-v4-pro", label: "DeepSeek V4 Pro" }],
       validateCredentials: vi.fn(),
-      analyze: providerAnalyze
+      generateRecruitmentProfile: vi.fn(),
+      analyzeCandidate: providerAnalyze
     };
     const deps = createDependencies(vi.fn<Analyze>()
       .mockImplementationOnce(() => pending.promise)

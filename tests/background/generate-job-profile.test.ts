@@ -38,7 +38,7 @@ function provider(generateRecruitmentProfile: NonNullable<ModelProvider["generat
     models: [{ id: "deepseek-v4-pro", label: "DeepSeek V4 Pro" }],
     validateCredentials: vi.fn(),
     generateRecruitmentProfile,
-    analyze: vi.fn()
+    analyzeCandidate: vi.fn()
   };
 }
 

@@ -2,7 +2,11 @@ import { describe, expect, it } from "vitest";
 import type { CandidateDraft } from "../../src/shared/contracts/candidate";
 import type { Job } from "../../src/shared/contracts/job";
 import { extractObjectiveFacts } from "../../src/domain/matching/facts";
-import { parseJobCriteria } from "../../src/domain/matching/requirements";
+import {
+  criteriaFromRecruitmentProfile,
+  parseJobCriteria
+} from "../../src/domain/matching/requirements";
+import type { ConfirmedRecruitmentProfile } from "../../src/shared/contracts/recruitment-profile";
 
 const job: Job = {
   id: "job-1",
@@ -30,6 +34,33 @@ const draft = (overrides: Partial<CandidateDraft> = {}): CandidateDraft => ({
 });
 
 describe("parseJobCriteria", () => {
+  it("uses confirmed profile requirement ids and priorities as the scoring criteria", () => {
+    const profile: ConfirmedRecruitmentProfile = {
+      version: 1,
+      roleTitle: "虚构产品经理",
+      roleObjective: "负责虚构企业软件",
+      requirements: [{
+        id: "confirmed-requirement",
+        text: "具备企业软件经验",
+        priority: "hard",
+        dimensionId: "functional_expertise",
+        weight: 100,
+        jobEvidence: ["岗位要求企业软件经验"]
+      }],
+      acceptableAlternatives: [],
+      ambiguities: [],
+      verificationQuestions: [],
+      confirmedAt: "2026-08-19T00:00:00.000Z"
+    };
+
+    expect(criteriaFromRecruitmentProfile(profile)).toEqual([{
+      id: "confirmed-requirement",
+      text: "具备企业软件经验",
+      priority: "hard",
+      source: "profile"
+    }]);
+  });
+
   it("treats explicit custom must-have language as hard and higher priority", () => {
     const criteria = parseJobCriteria({
       ...job,

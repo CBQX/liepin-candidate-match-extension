@@ -12,13 +12,6 @@ import type {
 import type { ProviderSettings } from "../repositories/chrome-provider-settings";
 import { appErrorCodeSchema, type AppError, type AppErrorCode } from "../shared/errors";
 
-export interface MatchInput {
-  job: Job;
-  candidateDraft: CandidateDraft;
-  criteria: readonly JobCriterion[];
-  ruleEvaluations: readonly RuleEvaluation[];
-}
-
 export type JobProfileInput = Pick<Job, "company" | "jd" | "customRequirements">;
 
 export interface CandidateMatchInput {
@@ -37,19 +30,13 @@ export interface ModelProvider {
   id: string;
   models: readonly ProviderModelMetadata[];
   validateCredentials(settings: ProviderSettings): Promise<void>;
-  generateRecruitmentProfile?(
+  generateRecruitmentProfile(
     input: JobProfileInput,
     settings: ProviderSettings,
     signal?: AbortSignal
   ): Promise<ModelRecruitmentProfile>;
-  analyzeCandidate?(
+  analyzeCandidate(
     input: CandidateMatchInput,
-    settings: ProviderSettings,
-    signal?: AbortSignal
-  ): Promise<ModelMatchResult>;
-  /** @deprecated Removed after the candidate pipeline migrates to confirmed profiles. */
-  analyze(
-    input: MatchInput,
     settings: ProviderSettings,
     signal?: AbortSignal
   ): Promise<ModelMatchResult>;

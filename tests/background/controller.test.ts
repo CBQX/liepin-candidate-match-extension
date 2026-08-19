@@ -45,6 +45,27 @@ const modelProfile: ModelRecruitmentProfile = {
   verificationQuestions: []
 };
 
+const confirmedProfileJob: Job = {
+  ...profileJob,
+  recruitmentProfile: {
+    ...modelProfile,
+    requirements: modelProfile.requirements.map((requirement) => ({
+      ...requirement,
+      weight: 100
+    })),
+    confirmedAt: "2026-08-19T01:00:00.000Z"
+  }
+};
+
+function unusedProviderOperations() {
+  return {
+    generateRecruitmentProfile: vi.fn(async () => modelProfile),
+    analyzeCandidate: vi.fn<NonNullable<ModelProvider["analyzeCandidate"]>>(
+      async () => { throw new Error("unused candidate operation"); }
+    )
+  };
+}
+
 function dependencies(overrides: Partial<Parameters<typeof createBackgroundController>[0]> = {}) {
   return {
     getActiveTab: async () => undefined,
@@ -156,7 +177,7 @@ describe("background controller", () => {
         { id: "deepseek-v4-pro", label: "DeepSeek V4 Pro" }
       ],
       validateCredentials,
-      analyze: vi.fn()
+      ...unusedProviderOperations()
     };
     const controller = createBackgroundController(dependencies({
       loadProviderSettings: async () => settings,
@@ -181,7 +202,7 @@ describe("background controller", () => {
       validateCredentials: vi.fn().mockRejectedValue(Object.assign(new Error("bad key"), {
         code: "INVALID_API_KEY"
       })),
-      analyze: vi.fn()
+      ...unusedProviderOperations()
     };
     const controller = createBackgroundController(dependencies({
       resolveProvider: () => provider
@@ -249,7 +270,7 @@ describe("background controller", () => {
       id: "internal-test-provider",
       models: [{ id: "balanced", label: "Balanced" }],
       validateCredentials: vi.fn().mockRejectedValue(new NormalizedProviderError("RATE_LIMITED")),
-      analyze: vi.fn()
+      ...unusedProviderOperations()
     };
     const controller = createBackgroundController(dependencies({
       loadProviderSettings: async () => ({
@@ -273,7 +294,8 @@ describe("background controller", () => {
       id: "internal-test-provider",
       models: [{ id: "balanced", label: "Balanced" }],
       validateCredentials: vi.fn(),
-      analyze: vi.fn<ModelProvider["analyze"]>((_input, _settings, signal) => {
+      generateRecruitmentProfile: vi.fn(async () => modelProfile),
+      analyzeCandidate: vi.fn<NonNullable<ModelProvider["analyzeCandidate"]>>((_input, _settings, signal) => {
         receivedSignal = signal;
         return new Promise<ModelMatchResult>((_resolve, reject) => {
           signal?.addEventListener("abort", () => reject(
@@ -293,14 +315,7 @@ describe("background controller", () => {
     const analysis = controller.handle({
       type: "ANALYZE_CANDIDATE",
       requestId: "analysis-123",
-      job: {
-        id: "job-1",
-        company: "甲公司",
-        jd: "必须本科",
-        customRequirements: "企业软件经验",
-        createdAt: "2026-08-18T00:00:00.000Z",
-        updatedAt: "2026-08-18T00:00:00.000Z"
-      },
+      job: confirmedProfileJob,
       candidateDraft,
       redactionContext: { identityTokens: [], identityDetection: "undetected" }
     });
@@ -321,12 +336,13 @@ describe("background controller", () => {
     const settingsPending = new Promise<typeof settings>((resolve) => {
       releaseSettings = () => resolve(settings);
     });
-    const analyze = vi.fn<ModelProvider["analyze"]>();
+    const analyze = vi.fn<NonNullable<ModelProvider["analyzeCandidate"]>>();
     const provider: ModelProvider = {
       id: "deepseek",
       models: [{ id: "deepseek-v4-pro", label: "DeepSeek V4 Pro" }],
       validateCredentials: vi.fn(),
-      analyze
+      generateRecruitmentProfile: vi.fn(async () => modelProfile),
+      analyzeCandidate: analyze
     };
     const controller = createBackgroundController(dependencies({
       loadProviderSettings: () => settingsPending,
@@ -335,14 +351,7 @@ describe("background controller", () => {
     const analysis = controller.handle({
       type: "ANALYZE_CANDIDATE",
       requestId: "analysis-before-settings",
-      job: {
-        id: "job-1",
-        company: "甲公司",
-        jd: "必须本科",
-        customRequirements: "企业软件经验",
-        createdAt: "2026-08-18T00:00:00.000Z",
-        updatedAt: "2026-08-18T00:00:00.000Z"
-      },
+      job: confirmedProfileJob,
       candidateDraft,
       redactionContext: { identityTokens: [], identityDetection: "undetected" }
     });
@@ -367,7 +376,7 @@ describe("background controller", () => {
       models: [{ id: "deepseek-v4-pro", label: "DeepSeek V4 Pro" }],
       validateCredentials: vi.fn(),
       generateRecruitmentProfile,
-      analyze: vi.fn()
+      analyzeCandidate: unusedProviderOperations().analyzeCandidate
     };
     const controller = createBackgroundController(dependencies({
       getActiveTab: async () => undefined,
@@ -401,7 +410,7 @@ describe("background controller", () => {
       models: [{ id: "deepseek-v4-pro", label: "DeepSeek V4 Pro" }],
       validateCredentials: vi.fn(),
       generateRecruitmentProfile,
-      analyze: vi.fn()
+      analyzeCandidate: unusedProviderOperations().analyzeCandidate
     };
     const controller = createBackgroundController(dependencies({ resolveProvider: () => provider }));
     const pending = controller.handle({
@@ -448,7 +457,7 @@ describe("background controller", () => {
           reject(new NormalizedProviderError("ANALYSIS_CANCELLED"));
         }));
       }),
-      analyze: vi.fn((_input, _settings, signal) => {
+      analyzeCandidate: vi.fn<NonNullable<ModelProvider["analyzeCandidate"]>>((_input, _settings, signal) => {
         candidateSignal = signal;
         return new Promise<ModelMatchResult>((_resolve, reject) => {
           signal?.addEventListener("abort", () => reject(
@@ -466,7 +475,7 @@ describe("background controller", () => {
     const candidatePending = controller.handle({
       type: "ANALYZE_CANDIDATE",
       requestId: "shared-request-id",
-      job: profileJob,
+      job: confirmedProfileJob,
       candidateDraft,
       redactionContext: { identityTokens: [], identityDetection: "undetected" }
     });

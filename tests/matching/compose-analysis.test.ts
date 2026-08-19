@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { composeAnalysis } from "../../src/domain/matching/compose-analysis";
+import { composeAnalysis as composeAnalysisDomain } from "../../src/domain/matching/compose-analysis";
 import { evaluateObjectiveRules } from "../../src/domain/matching/rules";
-import type { ModelMatchResult } from "../../src/shared/contracts/matching";
+import type { ModelMatchResult, RuleEvaluation } from "../../src/shared/contracts/matching";
 import type { CandidateDraft } from "../../src/shared/contracts/candidate";
+import type { ConfirmedRecruitmentProfile } from "../../src/shared/contracts/recruitment-profile";
 
 const dimensionIds = [
   "hard_requirements",
@@ -41,21 +42,70 @@ const completeDraft: CandidateDraft = {
   extractionConfidence: "high"
 };
 
+const defaultProfile: ConfirmedRecruitmentProfile = {
+  version: 1,
+  roleTitle: "虚构产品经理",
+  roleObjective: "负责虚构产品",
+  requirements: dimensionIds.map((dimensionId, index) => ({
+    id: `requirement-${index + 1}`,
+    text: `${dimensionId} 招聘要求`,
+    priority: index === 0 ? "hard" as const : "standard" as const,
+    dimensionId,
+    weight: [25, 25, 15, 15, 10, 10][index]!,
+    jobEvidence: [`${dimensionId} 岗位依据`]
+  })),
+  acceptableAlternatives: [],
+  ambiguities: [],
+  verificationQuestions: [],
+  confirmedAt: "2026-08-19T00:00:00.000Z"
+};
+
+const composeAnalysis = (
+  modelResult: ModelMatchResult,
+  ruleResults: readonly RuleEvaluation[],
+  candidate: CandidateDraft | CandidateDraft["extractionConfidence"],
+  profile = defaultProfile
+) => composeAnalysisDomain(modelResult, ruleResults, candidate, profile);
+
 describe("composeAnalysis", () => {
-  it("computes the weighted score and prevents strong recommendation on a hard failure", () => {
+  it("computes the weighted score without downgrading contact advice on a hard failure", () => {
     const analysis = composeAnalysis(modelResultWithAllDimensionsAt(90), [
       { criterionId: "c1", status: "not_met", evidence: ["候选人明确为大专"] }
     ], "high");
 
     expect(analysis.overallScore).toBe(90);
-    expect(analysis.recommendation).toBe("recommend");
+    expect(analysis.recommendation).toBe("strong_recommend");
   });
 
-  it("uses the fixed dimension weights and rounds only the total", () => {
+  it("uses the confirmed profile dimension weights and rounds only the total", () => {
     const analysis = composeAnalysis(modelResultWithScores([83, 71, 64, 92, 55, 78]), [], "high");
 
     expect(analysis.overallScore).toBe(75);
     expect(analysis.recommendation).toBe("recommend");
+  });
+
+  it("derives a job-specific score from requirement weights", () => {
+    const functionalOnly: ConfirmedRecruitmentProfile = {
+      ...defaultProfile,
+      requirements: [{
+        id: "functional-only",
+        text: "核心职能经验",
+        priority: "hard",
+        dimensionId: "functional_expertise",
+        weight: 100,
+        jobEvidence: ["岗位只强调核心职能经验"]
+      }]
+    };
+
+    const analysis = composeAnalysis(
+      modelResultWithScores([10, 92, 10, 10, 10, 10]),
+      [],
+      "high",
+      functionalOnly
+    );
+
+    expect(analysis.overallScore).toBe(92);
+    expect(analysis.recommendation).toBe("strong_recommend");
   });
 
   it.each([
@@ -70,14 +120,14 @@ describe("composeAnalysis", () => {
       .toBe(recommendation);
   });
 
-  it("sets not_recommend for two or more hard failures", () => {
+  it("does not turn multiple hard failures into an elimination result", () => {
     const analysis = composeAnalysis(modelResultWithAllDimensionsAt(95), [
       { criterionId: "c1", status: "not_met", evidence: ["证据一"] },
       { criterionId: "c2", status: "not_met", evidence: ["证据二"] }
     ], "high");
 
     expect(analysis.overallScore).toBe(95);
-    expect(analysis.recommendation).toBe("not_recommend");
+    expect(analysis.recommendation).toBe("strong_recommend");
   });
 
   it("lowers confidence for unknown hard requirements without deducting score", () => {
@@ -125,7 +175,7 @@ describe("composeAnalysis", () => {
     });
     expect(withContradictoryEvidence).toMatchObject({
       overallScore: 90,
-      recommendation: "strong_recommend",
+      recommendation: "cautious",
       confidence: "low"
     });
   });

@@ -5,7 +5,8 @@ import {
   type ModelMatchResult,
   type RuleEvaluation
 } from "../../shared/contracts/matching";
-import { DIMENSION_WEIGHTS } from "./weights";
+import type { ConfirmedRecruitmentProfile } from "../../shared/contracts/recruitment-profile";
+import { dimensionWeightsFromProfile } from "./weights";
 
 type Confidence = CandidateDraft["extractionConfidence"];
 type Recommendation = MatchAnalysis["recommendation"];
@@ -15,17 +16,6 @@ const scoreRecommendation = (score: number): Recommendation => {
   if (score >= 70) return "recommend";
   if (score >= 55) return "cautious";
   return "not_recommend";
-};
-
-const downgrade = (recommendation: Recommendation): Recommendation => {
-  const levels: readonly Recommendation[] = [
-    "strong_recommend",
-    "recommend",
-    "cautious",
-    "not_recommend"
-  ];
-  const index = levels.indexOf(recommendation);
-  return levels[Math.min(index + 1, levels.length - 1)]!;
 };
 
 const validateDimensions = (modelResult: ModelMatchResult): void => {
@@ -104,28 +94,28 @@ const deriveConfidence = (
 export function composeAnalysis(
   modelResult: ModelMatchResult,
   ruleResults: readonly RuleEvaluation[],
-  candidate: CandidateDraft | Confidence
+  candidate: CandidateDraft | Confidence,
+  recruitmentProfile: ConfirmedRecruitmentProfile
 ): MatchAnalysis {
   validateDimensions(modelResult);
 
+  const dimensionWeights = dimensionWeightsFromProfile(recruitmentProfile);
   const overallScore = Math.round(modelResult.dimensionScores.reduce(
-    (total, dimension) => total + dimension.score * DIMENSION_WEIGHTS[dimension.dimensionId],
+    (total, dimension) => total + dimension.score * dimensionWeights[dimension.dimensionId],
     0
   ));
-  const failureCount = ruleResults.filter(({ status }) => status === "not_met").length;
   const unknownCount = ruleResults.filter(({ status }) => status === "unknown").length;
   const scoreBand = scoreRecommendation(overallScore);
-  const recommendation = failureCount >= 2
-    ? "not_recommend"
-    : failureCount === 1
-      ? downgrade(scoreBand)
-      : scoreBand;
+  const confidence = deriveConfidence(modelResult, candidate, unknownCount);
+  const recommendation = confidence === "low" && overallScore >= 70
+    ? "cautious"
+    : scoreBand;
 
   return {
     ...modelResult,
     overallScore,
     recommendation,
-    confidence: deriveConfidence(modelResult, candidate, unknownCount),
+    confidence,
     hardRequirements: [...ruleResults]
   };
 }

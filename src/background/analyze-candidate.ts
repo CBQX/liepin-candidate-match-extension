@@ -1,6 +1,6 @@
 import { composeAnalysis } from "../domain/matching/compose-analysis";
 import { extractObjectiveFacts } from "../domain/matching/facts";
-import { parseJobCriteria } from "../domain/matching/requirements";
+import { criteriaFromRecruitmentProfile } from "../domain/matching/requirements";
 import { evaluateObjectiveRules } from "../domain/matching/rules";
 import type { ModelProvider } from "../providers/model-provider";
 import type { ProviderSettings } from "../repositories/chrome-provider-settings";
@@ -41,9 +41,16 @@ export async function analyzeCandidate(
   if (!deps.settings || deps.settings.apiKey.trim() === "") {
     throw new AnalysisPipelineError("MISSING_API_KEY");
   }
+  const recruitmentProfile = request.job.recruitmentProfile;
+  if (!recruitmentProfile) {
+    throw new AnalysisPipelineError("JOB_PROFILE_REQUIRED");
+  }
+  if (!deps.provider.analyzeCandidate) {
+    throw new AnalysisPipelineError("INVALID_PROVIDER_SETTINGS");
+  }
 
   const cleanCandidate = deps.redact(request.candidateDraft, request.redactionContext);
-  const criteria = parseJobCriteria(request.job);
+  const criteria = criteriaFromRecruitmentProfile(recruitmentProfile);
   const facts = extractObjectiveFacts(cleanCandidate);
   const ruleEvaluations = evaluateObjectiveRules(criteria, facts);
   const providerRuleEvaluations = ruleEvaluations.map((ruleEvaluation) =>
@@ -51,9 +58,9 @@ export async function analyzeCandidate(
       ? { ...ruleEvaluation, evidence: [] }
       : ruleEvaluation
   );
-  const modelResult = await deps.provider.analyze(
+  const modelResult = await deps.provider.analyzeCandidate(
     {
-      job: request.job,
+      recruitmentProfile,
       candidateDraft: cleanCandidate,
       criteria,
       // Unknown-status source evidence is recruiter-only compensation. The provider
@@ -68,7 +75,8 @@ export async function analyzeCandidate(
     return matchAnalysisSchema.parse(composeAnalysis(
       validatedModelResult,
       ruleEvaluations,
-      cleanCandidate
+      cleanCandidate,
+      recruitmentProfile
     ));
   } catch {
     throw new AnalysisPipelineError("INVALID_MODEL_OUTPUT");

@@ -1,4 +1,4 @@
-import type { CandidateMatchInput, MatchInput } from "../model-provider";
+import type { CandidateMatchInput } from "../model-provider";
 
 export interface AnalysisPrompt {
   system: string;
@@ -30,18 +30,6 @@ export function buildAnalysisPrompt(input: CandidateMatchInput): AnalysisPrompt 
     system,
     user: `请根据以下完整输入进行岗位匹配分析，并严格按系统消息中的 JSON 协议返回结果：\n${JSON.stringify({
       recruitmentProfile: input.recruitmentProfile,
-      candidateDraft: input.candidateDraft,
-      criteria: input.criteria,
-      ruleEvaluations: input.ruleEvaluations
-    }, null, 2)}`
-  };
-}
-
-export function buildLegacyAnalysisPrompt(input: MatchInput): AnalysisPrompt {
-  return {
-    system,
-    user: `请根据以下完整输入进行岗位匹配分析，并严格按系统消息中的 JSON 协议返回结果：\n${JSON.stringify({
-      job: input.job,
       candidateDraft: input.candidateDraft,
       criteria: input.criteria,
       ruleEvaluations: input.ruleEvaluations

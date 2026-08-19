@@ -10,12 +10,46 @@ import {
 import type { CandidateDraft } from "../../src/shared/contracts/candidate";
 import type { Job } from "../../src/shared/contracts/job";
 import type { ModelMatchResult } from "../../src/shared/contracts/matching";
+import type { ConfirmedRecruitmentProfile } from "../../src/shared/contracts/recruitment-profile";
+
+const recruitmentProfile: ConfirmedRecruitmentProfile = {
+  version: 1,
+  roleTitle: "企业软件产品经理",
+  roleObjective: "负责虚构企业软件产品",
+  requirements: [{
+    id: "profile-location",
+    text: "必须工作地点：上海",
+    priority: "hard",
+    dimensionId: "hard_requirements",
+    weight: 34,
+    jobEvidence: ["工作地点：上海"]
+  }, {
+    id: "profile-degree",
+    text: "必须本科",
+    priority: "hard",
+    dimensionId: "hard_requirements",
+    weight: 33,
+    jobEvidence: ["必须本科"]
+  }, {
+    id: "profile-years",
+    text: "必须有 5 年以上经验",
+    priority: "hard",
+    dimensionId: "functional_expertise",
+    weight: 33,
+    jobEvidence: ["必须有 5 年以上经验"]
+  }],
+  acceptableAlternatives: [],
+  ambiguities: [],
+  verificationQuestions: [],
+  confirmedAt: "2026-08-19T00:00:00.000Z"
+};
 
 const job: Job = {
   id: "job-1",
   company: "甲公司",
-  jd: "必须有 5 年以上经验",
-  customRequirements: "必须工作地点：上海\n必须本科",
+  jd: "必须有 5 年以上经验；原始 JD 唯一标记不得进入候选人调用",
+  customRequirements: "必须工作地点：上海\n必须本科\n原始个性化要求唯一标记不得进入候选人调用",
+  recruitmentProfile,
   createdAt: "2026-08-18T00:00:00.000Z",
   updatedAt: "2026-08-18T00:00:00.000Z"
 };
@@ -62,7 +96,9 @@ const settings = {
   apiKey: "sk-test"
 };
 
-function providerWithAnalyze(analyze: ModelProvider["analyze"]): ModelProvider {
+function providerWithAnalyze(
+  analyzeCandidate: NonNullable<ModelProvider["analyzeCandidate"]>
+): ModelProvider {
   return {
     id: "deepseek",
     models: [
@@ -70,7 +106,8 @@ function providerWithAnalyze(analyze: ModelProvider["analyze"]): ModelProvider {
       { id: "deepseek-v4-pro", label: "DeepSeek V4 Pro" }
     ],
     validateCredentials: vi.fn(),
-    analyze
+    generateRecruitmentProfile: vi.fn(),
+    analyzeCandidate
   };
 }
 
@@ -89,7 +126,8 @@ function analysisRuntimeRequest(requestId = "analysis-test") {
 describe("analyzeCandidate", () => {
   it("redacts, evaluates rules conservatively, calls the provider, and composes only the final analysis", async () => {
     // Break caught: bypassing any pipeline stage could leak identifiers, omit rules, revive deterministic location matching, or return an uncomposed score.
-    const analyze = vi.fn<ModelProvider["analyze"]>().mockResolvedValue(modelResult);
+    const analyze = vi.fn<NonNullable<ModelProvider["analyzeCandidate"]>>()
+      .mockResolvedValue(modelResult);
 
     const analysis = await analyzeCandidate({
       job,
@@ -104,7 +142,10 @@ describe("analyzeCandidate", () => {
     expect(analyze).toHaveBeenCalledTimes(1);
     const [input, receivedSettings] = analyze.mock.calls[0]!;
     expect(receivedSettings).toEqual(settings);
-    expect(input.job).toEqual(job);
+    expect(input.recruitmentProfile).toEqual(recruitmentProfile);
+    expect(input).not.toHaveProperty("job");
+    expect(JSON.stringify(input)).not.toContain(job.jd);
+    expect(JSON.stringify(input)).not.toContain(job.customRequirements);
     expect(input.candidateDraft.basics.text).not.toContain("张三");
     expect(input.candidateDraft.basics.text).not.toContain("13812345678");
     expect(input.criteria.map(({ text }) => text)).toEqual([
@@ -114,33 +155,33 @@ describe("analyzeCandidate", () => {
     ]);
     expect(input.ruleEvaluations).toEqual([
       {
-        criterionId: "custom-1",
+        criterionId: "profile-location",
         status: "unknown",
         evidence: []
       },
-      { criterionId: "custom-2", status: "met", evidence: ["明确学历：本科"] },
+      { criterionId: "profile-degree", status: "met", evidence: ["明确学历：本科"] },
       {
-        criterionId: "jd-1",
+        criterionId: "profile-years",
         status: "unknown",
         evidence: []
       }
     ]);
     expect(analysis.hardRequirements).toEqual([
       {
-        criterionId: "custom-1",
+        criterionId: "profile-location",
         status: "unknown",
         evidence: ["基本信息：现居地：上海"]
       },
-      { criterionId: "custom-2", status: "met", evidence: ["明确学历：本科"] },
+      { criterionId: "profile-degree", status: "met", evidence: ["明确学历：本科"] },
       {
-        criterionId: "jd-1",
+        criterionId: "profile-years",
         status: "unknown",
         evidence: ["工作经历：明确 8 年工作经验"]
       }
     ]);
     expect(analysis).toMatchObject({
       overallScore: 80,
-      recommendation: "recommend",
+      recommendation: "cautious",
       confidence: "low",
       recruiterConclusion: "建议推进并核实地点意愿"
     });
@@ -148,7 +189,7 @@ describe("analyzeCandidate", () => {
 
   it("re-redacts a recognized name added after preview and never forwards redaction metadata", async () => {
     // Break caught: the background trust boundary must sanitize recruiter edits without exposing identity metadata to a provider.
-    const analyze = vi.fn<ModelProvider["analyze"]>().mockResolvedValue(modelResult);
+    const analyze = vi.fn<NonNullable<ModelProvider["analyzeCandidate"]>>() .mockResolvedValue(modelResult);
     const prepared = prepareCandidateDraftForPreview(candidateDraft);
     const edited = structuredClone(prepared.draft);
     edited.projects.text = "张三负责新增项目";
@@ -170,7 +211,7 @@ describe("analyzeCandidate", () => {
 
   it("rejects a missing API key before invoking the provider", async () => {
     // Break caught: forwarding an empty credential would make an avoidable external request and obscure the setup action.
-    const analyze = vi.fn<ModelProvider["analyze"]>().mockResolvedValue(modelResult);
+    const analyze = vi.fn<NonNullable<ModelProvider["analyzeCandidate"]>>() .mockResolvedValue(modelResult);
 
     await expect(analyzeCandidate({ job, candidateDraft, redactionContext }, {
       provider: providerWithAnalyze(analyze),
@@ -181,9 +222,26 @@ describe("analyzeCandidate", () => {
     expect(analyze).not.toHaveBeenCalled();
   });
 
+  it("rejects a job without a confirmed profile before invoking the provider", async () => {
+    const analyze = vi.fn<NonNullable<ModelProvider["analyzeCandidate"]>>()
+      .mockResolvedValue(modelResult);
+
+    await expect(analyzeCandidate({
+      job: { ...job, recruitmentProfile: undefined },
+      candidateDraft,
+      redactionContext
+    }, {
+      provider: providerWithAnalyze(analyze),
+      settings,
+      redact: redactCandidateDraft
+    })).rejects.toMatchObject({ code: "JOB_PROFILE_REQUIRED" });
+
+    expect(analyze).not.toHaveBeenCalled();
+  });
+
   it("strips Liepin URLs, platform paths, and labeled profile identifiers at the background boundary", async () => {
     // Break caught: recruiter edits or extractor fallback text could reintroduce platform URLs/IDs after the preview redaction pass.
-    const analyze = vi.fn<ModelProvider["analyze"]>().mockResolvedValue(modelResult);
+    const analyze = vi.fn<NonNullable<ModelProvider["analyzeCandidate"]>>() .mockResolvedValue(modelResult);
     const draftWithPlatformIdentifiers: CandidateDraft = {
       ...candidateDraft,
       basics: {

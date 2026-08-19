@@ -258,8 +258,7 @@ describe("DeepSeekProvider", () => {
       models: [{ id: "fake-model", label: "Fake Model" }],
       validateCredentials: vi.fn(async () => undefined),
       generateRecruitmentProfile: vi.fn(async () => modelProfile),
-      analyzeCandidate: vi.fn(async () => modelResult),
-      analyze: vi.fn(async () => modelResult)
+      analyzeCandidate: vi.fn(async () => modelResult)
     };
 
     expect(await fake.generateRecruitmentProfile!(jobProfileInput, settings)).toEqual(modelProfile);

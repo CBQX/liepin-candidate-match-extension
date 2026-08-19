@@ -1,5 +1,8 @@
-import { parseJobCriteria } from "../../domain/matching/requirements";
-import { DIMENSION_WEIGHTS } from "../../domain/matching/weights";
+import {
+  criteriaFromRecruitmentProfile,
+  parseJobCriteria
+} from "../../domain/matching/requirements";
+import { dimensionWeightsFromProfile } from "../../domain/matching/weights";
 import type { Job } from "../../shared/contracts/job";
 import {
   dimensionIds,
@@ -74,7 +77,13 @@ interface AnalysisResultProps {
 }
 
 export function AnalysisResult({ analysis, job }: AnalysisResultProps) {
-  const criteriaById = new Map(parseJobCriteria(job).map((criterion) => [criterion.id, criterion.text]));
+  const criteria = job.recruitmentProfile
+    ? criteriaFromRecruitmentProfile(job.recruitmentProfile)
+    : parseJobCriteria(job);
+  const dimensionWeights = job.recruitmentProfile
+    ? dimensionWeightsFromProfile(job.recruitmentProfile)
+    : Object.fromEntries(dimensionIds.map((dimensionId) => [dimensionId, 0]));
+  const criteriaById = new Map(criteria.map((criterion) => [criterion.id, criterion.text]));
   const dimensionsById = new Map(analysis.dimensionScores.map((dimension) => [
     dimension.dimensionId,
     dimension
@@ -106,7 +115,7 @@ export function AnalysisResult({ analysis, job }: AnalysisResultProps) {
               <li key={dimensionId}>
                 <div className="dimension-heading">
                   <strong>{dimensionLabels[dimensionId]}</strong>
-                  <span>{dimension.score} 分 · 权重 {Math.round(DIMENSION_WEIGHTS[dimensionId] * 100)}%</span>
+                  <span>{dimension.score} 分 · 权重 {Math.round(dimensionWeights[dimensionId] * 100)}%</span>
                 </div>
                 <ul>{dimension.evidence.map((evidence) => <li key={evidence}>{evidence}</li>)}</ul>
               </li>

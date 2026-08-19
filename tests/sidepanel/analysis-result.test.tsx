@@ -130,7 +130,45 @@ describe("AnalysisResult", () => {
     const breakerJob: Job = {
       ...job,
       jd: "必须有 5 年以上经验",
-      customRequirements: "必须工作地点：上海\n必须持有 PMP\n必须本科"
+      customRequirements: "必须工作地点：上海\n必须持有 PMP\n必须本科",
+      recruitmentProfile: {
+        version: 1,
+        roleTitle: "企业软件产品经理",
+        roleObjective: "负责虚构企业软件产品",
+        requirements: [{
+          id: "custom-1",
+          text: "必须工作地点：上海",
+          priority: "hard",
+          dimensionId: "hard_requirements",
+          weight: 25,
+          jobEvidence: ["必须工作地点：上海"]
+        }, {
+          id: "custom-2",
+          text: "必须持有 PMP",
+          priority: "hard",
+          dimensionId: "hard_requirements",
+          weight: 25,
+          jobEvidence: ["必须持有 PMP"]
+        }, {
+          id: "custom-3",
+          text: "必须本科",
+          priority: "hard",
+          dimensionId: "hard_requirements",
+          weight: 25,
+          jobEvidence: ["必须本科"]
+        }, {
+          id: "jd-1",
+          text: "必须有 5 年以上经验",
+          priority: "hard",
+          dimensionId: "functional_expertise",
+          weight: 25,
+          jobEvidence: ["必须有 5 年以上经验"]
+        }],
+        acceptableAlternatives: [],
+        ambiguities: [],
+        verificationQuestions: [],
+        confirmedAt: "2026-08-19T00:00:00.000Z"
+      }
     };
     const sensitiveDraft: CandidateDraft = {
       basics: {
@@ -170,7 +208,7 @@ describe("AnalysisResult", () => {
       outreachAdvice: [],
       recruiterConclusion: "请由猎头结合候选人来源证据核实"
     };
-    const providerAnalyze = vi.fn<ModelProvider["analyze"]>().mockImplementation(async (input) => {
+    const providerAnalyze = vi.fn<ModelProvider["analyzeCandidate"]>().mockImplementation(async (input) => {
       const sawRecruiterOnlyEvidence = input.ruleEvaluations.some(
         ({ status, evidence }) => status === "unknown" && evidence.length > 0
       );
@@ -186,7 +224,8 @@ describe("AnalysisResult", () => {
       id: "deepseek",
       models: [],
       validateCredentials: async () => undefined,
-      analyze: providerAnalyze
+      generateRecruitmentProfile: vi.fn(),
+      analyzeCandidate: providerAnalyze
     };
 
     const composed = await analyzeCandidate({
@@ -259,7 +298,7 @@ describe("AnalysisResult", () => {
     expect(composed).toMatchObject({
       overallScore: 80,
       confidence: "low",
-      recommendation: "recommend"
+      recommendation: "cautious"
     });
     expect(JSON.stringify(composed)).not.toMatch(/张三|13812345678|123456|liepin\.com|candidate\/secret/u);
     expect(JSON.stringify(providerAnalyze.mock.calls)).not.toMatch(

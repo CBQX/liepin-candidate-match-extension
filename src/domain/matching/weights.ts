@@ -1,8 +1,17 @@
-export const DIMENSION_WEIGHTS = {
-  hard_requirements: 0.25,
-  functional_expertise: 0.25,
-  industry_business: 0.15,
-  seniority_impact: 0.15,
-  trajectory_stability: 0.10,
-  recruiter_feasibility: 0.10
-} as const;
+import { dimensionIds } from "../../shared/contracts/matching";
+import type { ConfirmedRecruitmentProfile } from "../../shared/contracts/recruitment-profile";
+
+export type DimensionWeights = Record<typeof dimensionIds[number], number>;
+
+export function dimensionWeightsFromProfile(
+  profile: ConfirmedRecruitmentProfile
+): DimensionWeights {
+  const weights = Object.fromEntries(
+    dimensionIds.map((dimensionId) => [dimensionId, 0])
+  ) as DimensionWeights;
+
+  for (const requirement of profile.requirements) {
+    weights[requirement.dimensionId] += requirement.weight / 100;
+  }
+  return weights;
+}

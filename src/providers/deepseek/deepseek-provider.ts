@@ -14,11 +14,10 @@ import {
   NormalizedProviderError,
   type CandidateMatchInput,
   type JobProfileInput,
-  type MatchInput,
   type ModelProvider
 } from "../model-provider";
 import { buildJobProfilePrompt } from "./job-profile-prompt";
-import { buildAnalysisPrompt, buildLegacyAnalysisPrompt, type AnalysisPrompt } from "./prompt";
+import { buildAnalysisPrompt, type AnalysisPrompt } from "./prompt";
 
 type Fetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
@@ -139,20 +138,6 @@ export class DeepSeekProvider implements ModelProvider {
         throw new NormalizedProviderError("MODEL_UNAVAILABLE");
       }
     });
-  }
-
-  async analyze(
-    input: MatchInput,
-    settings: ProviderSettings,
-    signal?: AbortSignal
-  ): Promise<ModelMatchResult> {
-    return this.requestStructured(
-      buildLegacyAnalysisPrompt(input),
-      modelMatchResultSchema,
-      settings,
-      signal,
-      8192
-    );
   }
 
   async generateRecruitmentProfile(
